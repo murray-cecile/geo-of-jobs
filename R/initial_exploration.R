@@ -69,9 +69,16 @@ cty_summary <- all_jobs %>% select(-tract, -stfips) %>%
   group_by(stcofips) %>% summarize_all(sum, na.rm=TRUE) %>%
   mutate(jobs_sqmi = job_tot / ALAND_SQMI)
 
+#============================================================#
+# IDENTIFYING DENSITY
+#============================================================#
+
 # what percentage of jobs do tracts in the top decile capture? About 1/3.
 # what about the top 5%? A little over 20%. 
 # and the top 2% contain just about 1/6 of all jobs
 most_dense <- filter(all_jobs, ntile(jobs_sqmi, 100)>97)
 sum(most_dense$job_tot, na.rm=TRUE) / sum(all_jobs$job_tot, na.rm=TRUE)
 
+# map that
+ggplot(left_join(counties.sf, most_dense, by="stcofips")) +
+  geom_sf(mapping = aes())
