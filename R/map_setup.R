@@ -38,6 +38,21 @@ counties.sf %<>% clean_tigris_sf("stcofips")
 states.sf %<>% clean_tigris_sf("stfips")
 
 # save
-st_write(tracts.sf, "tracts.shp")
-st_write(counties.sf, "counties.shp")
-st_write(states.sf, "states.shp")
+# st_write(tracts.sf, "temp/tracts.shp")
+# st_write(counties.sf, "temp/counties.shp")
+# st_write(states.sf, "temp/states.shp")
+
+# read in
+# tracts.sf <- st_read()
+
+# convert to point for standard ggplot viz
+tracts.df <- tidy(tracts.shp, region = "GEOID") %>%
+  dplyr::rename(tract = id)
+counties.df <- tidy(counties.shp, region = "GEOID") %>%
+  dplyr::rename(stcofips = id) %>%
+  filter(!substr(stcofips, 1, 2) %in% c("02", "15"),
+         as.numeric(substr(stcofips, 1, 2)) < 57)
+states.df <- tidy(states.shp, region = "GEOID") %>%
+  dplyr::rename(stfips = id) %>%
+  filter(!stfips %in% c("02", "15"),
+         as.numeric(stfips) < 57)

@@ -80,5 +80,7 @@ most_dense <- filter(all_jobs, ntile(jobs_sqmi, 100)>97)
 sum(most_dense$job_tot, na.rm=TRUE) / sum(all_jobs$job_tot, na.rm=TRUE)
 
 # map that
-ggplot(left_join(counties.sf, most_dense, by="stcofips")) +
-  geom_sf(mapping = aes())
+ggplot(left_join(counties.df, most_dense, by="stcofips")) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = jobs_sqmi)) +
+  coord_map() +
+  theme_minimal()
