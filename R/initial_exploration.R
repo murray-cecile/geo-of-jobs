@@ -10,50 +10,11 @@
 library(here)
 source(here("R", "setup.R"))
 
-#============================================================#
-# LOAD GEOGRAPHIC DATA
-#============================================================#
-
-# county-CBSA xwalk
-setwd(xwalk_dir)
-cbsa_xwalk <- read.dta13("county metro xwalk.dta") %>%
-  filter(metro_micro=="Metropolitan Statistical Area")
-setwd(here())
-
-# Land area files from the 2016 Census Gazetteer
-cty_area <- read_tsv(here("raw", "2016_Gaz_counties_national.txt")) %>%
-  dplyr::rename(stcofips = GEOID)
-tract_area <- data.table::fread(here("raw", "2016_Gaz_tracts_national.txt"), integer64 = "numeric")
-tract_area %<>% mutate(tract = padz(as.character(GEOID)),
-                       stcofips = substr(tract, 1, 5))
+load(here("temp", "prepped_LEHD_2015.Rdata"))
 
 #============================================================#
-# BRING IN LEHD DATA
+# PLOT, SUMMARIES
 #============================================================#
-
-setwd(paste0(lehd_dir, "wac_2015"))
-raw_lehd_15 <- read.dta13("2015_ALL_wac.dta")
-setwd(here())
-
-# collapse to tract, merge with land area data
-lehd_tract <- raw_lehd_15 %>% mutate(tract = substr(fips, 1, 11)) %>%
-  select(-fips) %>%
-  group_by(tract) %>% summarize_all(sum, na.rm=TRUE) %>%
-  recode_dumb_tracts() %>%
-  left_join(select(tract_area, tract, ALAND_SQMI), by="tract") %>%
-  mutate(jobs_sqmi = job_tot / ALAND_SQMI,
-         hwage_share = wage_high / job_tot,
-         hwage_density = wage_high / ALAND_SQMI,
-         ba_share = baplus / job_tot,
-         ba_density = baplus / ALAND_SQMI)
-
-#============================================================#
-# BASIC SUMMARIES
-#============================================================#
-
-all_jobs <- lehd_tract %>% mutate(stfips = substr(tract, 1, 2),
-                                  stcofips = substr(tract, 1, 5)) %>%
-  select(tract, stfips, stcofips, job_tot, ALAND_SQMI, jobs_sqmi)
 
 ggplot(filter(all_jobs, substr(tract, 1, 5) %in% cbsa_xwalk$stcofips)) +
   geom_histogram(aes(x = jobs_sqmi))
@@ -84,3 +45,22 @@ ggplot(left_join(counties.df, most_dense, by="stcofips")) +
   geom_polygon(aes(x = long, y = lat, group = group, fill = jobs_sqmi)) +
   coord_map() +
   theme_minimal()
+
+# how many metros are represented? 188
+length(unique(cbsa_xwalk$cbsa_name[cbsa_xwalk$stcofips %in% unique(most_dense$stcofips)]))
+
+# okay, let's look at metro status: 
+most_dense %<>% left_join(select(cbsa_xwalk, stcofips, cbsa, cbsa_name, top100), by="stcofips")
+length(which(is.na(most_dense$cbsa))) # 4 non-metro tracts!
+# View(most_dense[is.na(most_dense$cbsa), ]) # includes two universities
+
+# how many in top 100?
+sum(most_dense$top100, na.rm = TRUE) # 2,022 of 2,173, approx 93%
+# View(most_dense[most_dense$top100==0, ])
+
+#============================================================#
+# TOP 100 METROS
+#============================================================#
+
+# okay, how do the top 100 metros shake out? # NYC, LA dominate. Looks
+top100_summary <- data.frame(with(most_dense, table(cbsa_name)))
