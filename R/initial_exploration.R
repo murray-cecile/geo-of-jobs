@@ -62,5 +62,20 @@ sum(most_dense$top100, na.rm = TRUE) # 2,022 of 2,173, approx 93%
 # TOP 100 METROS
 #============================================================#
 
-# okay, how do the top 100 metros shake out? # NYC, LA dominate. Looks
+# okay, how do the top 100 metros shake out? # NYC, LA dominate. 
 top100_summary <- data.frame(with(most_dense, table(cbsa_name)))
+
+# mean density by metro?
+top100_summary <- left_join(all_jobs,
+                            select(cbsa_xwalk, stcofips, cbsa, cbsa_name, top100),
+                            by="stcofips") %>%
+  filter(top100==1, ALAND_SQMI > 0) %>% 
+  select(cbsa, cbsa_name, job_tot, ALAND_SQMI, jobs_sqmi) %>%
+  group_by(cbsa, cbsa_name) %>% summarize_all(median, na.rm=TRUE) %>%
+  left_join(top100_summary, by="cbsa_name") %>%
+  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
+  
+
+ggplot(top100_summary) +
+  geom_col(aes(x = reorder(short_name, -jobs_sqmi), y = jobs_sqmi))
