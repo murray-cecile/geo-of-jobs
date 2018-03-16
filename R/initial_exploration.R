@@ -30,6 +30,12 @@ cty_summary <- all_jobs %>% select(-tract, -stfips) %>%
   group_by(stcofips) %>% summarize_all(sum, na.rm=TRUE) %>%
   mutate(jobs_sqmi = job_tot / ALAND_SQMI)
 
+# relationship between density and tract size is slightly negative
+ggplot(all_jobs) +
+  geom_point(aes(x = ALAND_SQMI, y = job_tot)) +
+  geom_smooth(aes(x = ALAND_SQMI, y = job_tot), method = lm)
+
+
 #============================================================#
 # IDENTIFYING DENSITY
 #============================================================#
@@ -65,7 +71,7 @@ sum(most_dense$top100, na.rm = TRUE) # 2,022 of 2,173, approx 93%
 # okay, how do the top 100 metros shake out? # NYC, LA dominate. 
 top100_summary <- data.frame(with(most_dense, table(cbsa_name)))
 
-# mean density by metro?
+# median density by metro?
 top100_summary <- left_join(all_jobs,
                             select(cbsa_xwalk, stcofips, cbsa, cbsa_name, top100),
                             by="stcofips") %>%
@@ -76,6 +82,27 @@ top100_summary <- left_join(all_jobs,
   mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
          short_name = ifelse(short_name=="", cbsa_name, short_name))
   
-
+# plot the distribution of median density 
 ggplot(top100_summary) +
-  geom_col(aes(x = reorder(short_name, -jobs_sqmi), y = jobs_sqmi))
+  geom_col(aes(x = reorder(short_name, -jobs_sqmi), y = jobs_sqmi, fill = Freq))
+
+# plot density distrbutions for top 100
+top100 <- left_join(all_jobs, select(cbsa_xwalk, stcofips, cbsa, cbsa_name, top100),
+                    by="stcofips") %>%
+  filter(top100==1, ALAND_SQMI > 0) %>%
+  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
+
+ggplot(filter(top100, !tract %in% most_dense$tract)) +
+  geom_boxplot(aes(x = reorder(short_name, -jobs_sqmi), y = jobs_sqmi))
+
+# check tract area size distribution by metro
+area_summary <- left_join(all_jobs,
+                          select(cbsa_xwalk, stcofips, cbsa, cbsa_name, top100),
+                          by="stcofips") %>%
+  filter(top100==1) %>% 
+  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
+
+ggplot(area_summary) +
+  geom_freqpoly(aes(x = ALAND_SQMI))
