@@ -17,16 +17,16 @@ lapply(libs, library, character.only=TRUE)
 #============================================================#
 
 # directory with LEHD data
-# lehd_dir <- "V:/LEHD LODES"
-lehd_dir <- "D:/LEHD LODES/"
+lehd_dir <- "V:/LEHD LODES"
+# lehd_dir <- "D:/LEHD LODES/"
 
 # geographic crosswalks
-# xwalk_dir <- "V:/Metro Poverty/CMM/xwalks/"
-xwalk_dir <- "C:/Users/cmurray/Documents/xwalks"
+xwalk_dir <- "V:/Metro Poverty/CMM/xwalks/"
+# xwalk_dir <- "C:/Users/cmurray/Documents/xwalks"
 
 # Cecile's scripts with extra functions
-# scripts_dir <- "V:/Metro Poverty/CMM/scripts/"
-scripts_dir <- "C:/Users/cmurray/Documents/scripts"
+scripts_dir <- "V:/Metro Poverty/CMM/scripts/"
+# scripts_dir <- "C:/Users/cmurray/Documents/scripts"
 
 #============================================================#
 # FNS
