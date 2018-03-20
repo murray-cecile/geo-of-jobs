@@ -31,7 +31,13 @@ emp <- separate(cty_comp, DBcode, c("industry", "sep", "geo"), sep = "A") %>%
 
 # rm(cty_comp)
 
+# split off total employment into its own data frame
 totemp15 <- emp %>% select(stcofips, industry, y2015) %>% filter(industry=="RET")
+
+# modify emp to better match LEHD NAICS codes
+emp %<>% filter(industry!="RET") %>%
+  mutate(naics = gsub("RE", "naics_", industry),
+         naics = ifelse(substr(naics, 7, 8)=="GV", "naics_GV", naics))
 
 #============================================================#
 # COMPARE COUNTY TOTALS
@@ -48,3 +54,22 @@ ggplot(tot_check) +
 
 # in total, LEHD undershoots Moody's by just under 3.8M jobs
 sum(tot_check$delta, na.rm=TRUE)
+
+# now check by naics sector
+naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
+  gather(key = "naics", value ="jobs", -stcofips) %>%
+  mutate(naics2 = gsub("naics_", "", naics),
+         naics2 = ifelse(naics2=="31to33", "MF",
+                         ifelse(naics2=="44to45", "RT",
+                                ifelse(naics2=="48to49", "RW", 
+                                       ifelse(naics2=="92", "GV", naics2)))),
+         naics = paste0("naics_", naics2)) %>% 
+  select(-naics2) %>%
+  left_join(select(emp, stcofips, naics, y2015), by=c("stcofips", "naics")) %>%
+  mutate(m_tot = y2015 * 1000,
+         delta = jobs - y2015,
+         percent_delta = delta / m_tot) %>%
+  filter(!is.na(m_tot))
+
+ggplot(naics_check) +
+  geom_histogram(aes(x = percent_delta, group = naics))
