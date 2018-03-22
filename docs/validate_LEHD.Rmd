@@ -1,0 +1,93 @@
+---
+title: "Validate LEHD data against other employment data sources"
+author: "Cecile Murray"
+date: "March 22, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Goal
+
+The goal of this script is to cross-check the LEHD dataset against another commonly used data source, namely Moody's. 
+
+## Setup
+
+First, we'll run setup.R to load required packages and set some global variables.
+
+```{r setting_up, message = FALSE, cache = TRUE}
+library(here)
+source(here("R", "setup.R"))
+```
+
+Next, we'll bring in some pre-prepared LEHD data and collapse it to the county level.
+
+```{r prep_lehd, cache = TRUE, dependson = "setting_up"}
+# bring in prepared LEHD dataset
+load(here("temp", "prepped_LEHD_2015.Rdata"))
+
+# collapse LEHD data to counties
+lehd <- raw_lehd %>% mutate(stcofips = substr(fips, 1, 5)) %>%
+  select(-fips) %>% group_by(stcofips) %>% summarize_all(sum, na.rm=TRUE)
+
+```
+
+Then, we bring in the Moody's data and do some reformatting; we end up with two data frames, one of which contains total employment and the other of which holds employment by industry. Notably, we've recoded federal, state, and local government employment so that it's all in one general government category, in order to match LEHD.
+
+```{r prep_moodys, cache = TRUE}
+
+# bring in the dataset (admittedly sloppy re-use of old code)
+setwd("P:/Projects/Older Industrial Cities/Analysis/code/older_industrial_cities")
+source("R/pull_employment_data.R")
+rm(list=setdiff(ls(), "cty_comp"))
+setwd(here("docs"))
+
+emp <- separate(cty_comp, DBcode, c("industry", "sep", "geo"), sep = "A") %>%
+  dplyr::rename_at(vars(num_range("", 1970:2016)), funs(paste0("y", .))) %>%
+  select(stcofips, industry, num_range("y", 2002:2016))
+
+# could drop the raw data frame
+# rm(cty_comp)
+
+# split off total employment into its own data frame
+totemp15 <- emp %>% select(stcofips, industry, y2015) %>% filter(industry=="RET")
+
+# modify emp to better match LEHD NAICS codes
+emp %<>% filter(industry!="RET") %>%
+  mutate(naics = gsub("RE", "naics_", industry),
+         naics = ifelse(substr(naics, 7, 8)=="GV", "naics_GV", naics)) %>%
+  select(-industry) %>% group_by(stcofips, naics) %>% summarize_all(sum, na.rm=TRUE)
+```
+
+## Compare totals by industry
+
+Now we're ready to compare job totals from LEHD to Moody's. We'll start with the total count of jobs at the national level, then look at industry level totals.
+
+```{r tot_check, dependson = c("prep_lehd", "prep_moodys")}
+# merge LEHD and Moody's; calculate difference in job totals
+tot_check <- lehd %>% select(stcofips, job_tot) %>%
+  left_join(totemp15, by="stcofips") %>%
+  mutate(m_tot = y2015 * 1000,
+         delta = job_tot - m_tot,
+         percent_delta = delta / m_tot) %>% filter(!is.na(m_tot))
+```
+
+Here's a plot:
+
+```{r tot_check_plot, echo = FALSE, messages = FALSE, dependson = c("prep_lehd", "prep_moodys")}
+# In most counties, the difference in total jobs is pretty small
+ggplot(tot_check) +
+  geom_histogram(aes(x = percent_delta)) +
+  labs(title = "Percent Difference in Job Totals by County, LEHD less Moody's",
+       x = "Percent difference (LEHD minus Moody's")
+```
+
+In total, LEHD undershoots Moody's by just under 3.8M jobs, or a little less than 3 percent.
+
+```{r tot_check_sums, dependson=  c("prep_lehd", "prep_moodys")}
+sum(tot_check$delta, na.rm=TRUE)
+sum(tot_check$delta, na.rm=TRUE) / sum(tot_check$m_tot, na.rm=TRUE)
+```
+
