@@ -1,7 +1,7 @@
 ---
 title: "Validate LEHD data against other employment data sources"
 author: "Cecile Murray"
-date: "March 22, 2018"
+date: "March 27•, 2018"
 output: html_document
 ---
 
@@ -89,5 +89,82 @@ In total, LEHD undershoots Moody's by just under 3.8M jobs, or a little less tha
 ```{r tot_check_sums, dependson=  c("prep_lehd", "prep_moodys")}
 sum(tot_check$delta, na.rm=TRUE)
 sum(tot_check$delta, na.rm=TRUE) / sum(tot_check$m_tot, na.rm=TRUE)
+```
+
+Next, we can look at differences by sector, and see that there are some significant differences there.
+
+```{r industry_tot, dependson=c("prep_lehd", "prep_moodys")}
+# now check by naics sector across all counties
+naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
+  gather(key = "naics", value ="jobs", -stcofips) %>%
+  mutate(naics2 = gsub("naics_", "", naics),
+         naics2 = ifelse(naics2=="31to33", "MF",
+                         ifelse(naics2=="44to45", "RT",
+                                ifelse(naics2=="48to49", "RW", 
+                                       ifelse(naics2=="92", "GV", naics2)))),
+         naics = paste0("naics_", naics2)) %>% 
+  select(-naics2) %>%
+  left_join(select(emp, stcofips, naics, y2015), by=c("stcofips", "naics")) %>%
+  select(-stcofips) %>% group_by(naics) %>% summarise_all(sum, na.rm=TRUE) %>%
+  mutate(m_tot = y2015 * 1000,
+         delta = jobs - m_tot,
+         percent_delta = delta / m_tot, 
+         short_name = gsub("naics_", "", naics)) %>%
+  filter(!is.na(m_tot), naics!="naics_11") 
+
+```
+
+We can see some substantial differences in jobs counts by sector, especially in education (61), government (GV), utilities (22), and other services (81).
+
+```{r industry_tot_plots, dependson="industry_tot"}
+# plot job counts by sector
+ggplot(gather(naics_check, key = "source", value = "job_ct", jobs, m_tot)) +
+  geom_col(aes(x = reorder(short_name, -job_ct), y = job_ct, group = source,
+               fill = source), position = "dodge") +
+  labs(title = "Job Totals by Sector, LEHD vs. Moody's, 2015",
+       x = "Sector", "Jobs")
+
+
+# by industry, percentage differences are mostly small except in 61, 22, GV, 81
+ggplot(naics_check) +
+  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta*100))
+```
+
+## Compare across geography
+
+The national totals probably mask some regional differences, so we can compare metro area job totals by sector to see whether there are any particularly wide gaps between the two sources.
+
+```{r met_totals, dependson=c("prep_lehd", "prep_moodys")}
+# collapse job totals to metro
+met_check <- lehd %>% select(stcofips, job_tot) %>%
+  left_join(totemp15, by="stcofips") %>%
+  left_join(select(cbsa_xwalk, stcofips, cbsa, top100), by="stcofips") %>%
+  select(-stcofips, -industry) %>% group_by(cbsa) %>% summarize_all(sum, na.rm=TRUE) %>%
+  mutate(m_tot = y2015 * 1000,
+         delta = job_tot - m_tot,
+         percent_delta = delta / m_tot) %>% 
+  filter(top100 > 0)
+
+ggplot(met_check) +
+  geom_col(aes(x = reorder(cbsa, -delta), y = delta)) +
+  
+```
+
+```{r}
+met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
+  gather(key = "naics", value ="jobs", -stcofips, -job_tot) %>%
+  mutate(naics2 = gsub("naics_", "", naics),
+         naics2 = ifelse(naics2=="31to33", "MF",
+                         ifelse(naics2=="44to45", "RT",
+                                ifelse(naics2=="48to49", "RW", 
+                                       ifelse(naics2=="92", "GV", naics2)))),
+         naics = paste0("naics_", naics2)) %>% 
+  select(-naics2) %>%
+  left_join(select(emp, stcofips, naics, y2015), by=c("stcofips", "naics")) %>%
+  left_join(select(cbsa_xwalk, stcofips, cbsa, top100), by="stcofips") %>%
+  filter(top100==1) %>%
+  select(-stcofips) %>% group_by(cbsa, naics) %>% summarize_all(sum, na.rm=TRUE) %>%
+  mutate(m_tot = y2015 * 1000,
+         delta = jobs - m_tot)
 ```
 

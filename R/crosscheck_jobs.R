@@ -95,10 +95,25 @@ met_check <- lehd %>% select(stcofips, job_tot) %>%
   mutate(m_tot = y2015 * 1000,
          delta = job_tot - m_tot,
          percent_delta = delta / m_tot) %>% 
-  filter(top100 > 0)
+  filter(top100 > 0) %>%
+  left_join(select(cbsa_xwalk, cbsa, cbsa_name), by="cbsa") %>% distinct() %>%
+  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
+
+# wide range of job deltas, unfortunately.
+summary(met_check$delta)
+summary(met_check$percent_delta)
 
 ggplot(met_check) +
-  geom_col(aes(x = reorder(cbsa, -delta), y = delta)) +
+  geom_col(aes(x = reorder(short_name, -delta), y = delta)) 
+
+# identify the ones with a wider gap than the nation overall
+met_check %<>% mutate(wide_gap = ifelse(abs(percent_delta) >
+                                          abs(sum(tot_check$delta, na.rm=TRUE)/sum(tot_check$m_tot, na.rm=TRUE)),
+                                        1, 0))
+# plot the subset
+ggplot(filter(met_check, wide_gap==1)) +
+  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta))
   
 
 met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
