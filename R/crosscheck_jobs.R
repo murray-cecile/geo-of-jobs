@@ -96,9 +96,7 @@ met_check <- lehd %>% select(stcofips, job_tot) %>%
          delta = job_tot - m_tot,
          percent_delta = delta / m_tot) %>% 
   filter(top100 > 0) %>%
-  left_join(select(cbsa_xwalk, cbsa, cbsa_name), by="cbsa") %>% distinct() %>%
-  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
-         short_name = ifelse(short_name=="", cbsa_name, short_name))
+  left_join(select(cbsa_xwalk, cbsa, cbsa_name), by="cbsa") %>% distinct() 
 
 # wide range of job deltas, unfortunately.
 summary(met_check$delta)
@@ -115,8 +113,8 @@ met_check %<>% mutate(wide_gap = ifelse(abs(percent_delta) >
 ggplot(filter(met_check, wide_gap==1)) +
   geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta))
   
-
-met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
+# collapse job totals by metro by industry
+met_naics_check <- lehd %>% select(stcofips, job_tot, contains("naics")) %>%
   gather(key = "naics", value ="jobs", -stcofips, -job_tot) %>%
   mutate(naics2 = gsub("naics_", "", naics),
          naics2 = ifelse(naics2=="31to33", "MF",
@@ -130,5 +128,14 @@ met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
   filter(top100==1) %>%
   select(-stcofips) %>% group_by(cbsa, naics) %>% summarize_all(sum, na.rm=TRUE) %>%
   mutate(m_tot = y2015 * 1000,
-         delta = jobs - m_tot)
-  
+         delta = jobs - m_tot,
+         percent_delta = ifelse(m_tot > 0, delta / m_tot, 0),
+         delta_share = ifelse(job_tot > 0, delta / job_tot, 0))
+
+bad_naics <- c("naics_22", "naics_61", "naics_62", "naics_GV")
+summary(met_naics_check$percent_delta[!met_naics_check$naics %in% bad_naics])
+summary(met_naics_check$delta_share)
+
+ggplot(filter(met_naics_check, !naics %in% bad_naics)) +
+  geom_histogram(aes(x = delta_share))
+

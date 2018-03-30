@@ -1,7 +1,7 @@
 ---
-title: "Validate LEHD data against other employment data sources"
+title: "Compare the LEHD data against Moody's employment data"
 author: "Cecile Murray"
-date: "March 27•, 2018"
+date: "March 30, 2018"
 output: html_document
 ---
 
@@ -9,9 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Goal
+## Purpose
 
-The goal of this script is to cross-check the LEHD dataset against another commonly used data source, namely Moody's. 
+We compare the LEHD dataset against another commonly used data source, namely Moody's. We find that the difference in total employment is small, but this masks larger differences within sectors and across metro areas. Education, government, public utilities, and other services are the industries that differ msot across sources. Washington, DC and Honolulu, HI have the largest discrepancies in total jobs. 
+
+Without detailed knowledge of Moody's methdology, we cannot be sure of the source of these discrepncies. However, we can at least describe those differences so we remain aware of them as we undertake further analysis.
 
 ## Setup
 
@@ -20,30 +22,22 @@ First, we'll run setup.R to load required packages and set some global variables
 ```{r setting_up, message = FALSE, cache = TRUE}
 library(here)
 source(here("R", "setup.R"))
+
+# saving names of objects in the current environment 
+current_env <- ls() 
 ```
 
-Next, we'll bring in some pre-prepared LEHD data and collapse it to the county level.
-
-```{r prep_lehd, cache = TRUE, dependson = "setting_up"}
-# bring in prepared LEHD dataset
-load(here("temp", "prepped_LEHD_2015.Rdata"))
-
-# collapse LEHD data to counties
-lehd <- raw_lehd %>% mutate(stcofips = substr(fips, 1, 5)) %>%
-  select(-fips) %>% group_by(stcofips) %>% summarize_all(sum, na.rm=TRUE)
-
-```
-
-Then, we bring in the Moody's data and do some reformatting; we end up with two data frames, one of which contains total employment and the other of which holds employment by industry. Notably, we've recoded federal, state, and local government employment so that it's all in one general government category, in order to match LEHD.
+We'll then bring in the Moody's data and do some reformatting; we end up with two data frames, one of which contains total employment and the other of which holds employment by industry. Importantly, we've recoded federal, state, and local government employment so that it's all in one general government category, in order to try to match LEHD. (Note that the warnings generated here come from separating the county-industry codes - it's not an error.)
 
 ```{r prep_moodys, cache = TRUE}
 
 # bring in the dataset (admittedly sloppy re-use of old code)
 setwd("P:/Projects/Older Industrial Cities/Analysis/code/older_industrial_cities")
 source("R/pull_employment_data.R")
-rm(list=setdiff(ls(), "cty_comp"))
+rm(list=setdiff(ls(), c(current_env, "cty_comp")))
 setwd(here("docs"))
 
+# separate the combined county-industry unique ID into two vars, rename year vars
 emp <- separate(cty_comp, DBcode, c("industry", "sep", "geo"), sep = "A") %>%
   dplyr::rename_at(vars(num_range("", 1970:2016)), funs(paste0("y", .))) %>%
   select(stcofips, industry, num_range("y", 2002:2016))
@@ -51,8 +45,19 @@ emp <- separate(cty_comp, DBcode, c("industry", "sep", "geo"), sep = "A") %>%
 # could drop the raw data frame
 # rm(cty_comp)
 
-# split off total employment into its own data frame
+# split off total employment into its own data frame for convenience
 totemp15 <- emp %>% select(stcofips, industry, y2015) %>% filter(industry=="RET")
+```
+
+Next, we'll bring in some pre-prepared LEHD data and collapse it to the county level.
+
+```{r prep_lehd, cache = TRUE, dependson = c("setting_up", "prep_moodys")}
+# bring in prepared LEHD dataset
+load(here("temp", "prepped_LEHD_2015.Rdata"))
+
+# collapse LEHD data to counties
+lehd <- raw_lehd %>% mutate(stcofips = substr(fips, 1, 5)) %>%
+  select(-fips) %>% group_by(stcofips) %>% summarize_all(sum, na.rm=TRUE)
 
 # modify emp to better match LEHD NAICS codes
 emp %<>% filter(industry!="RET") %>%
@@ -69,29 +74,28 @@ Now we're ready to compare job totals from LEHD to Moody's. We'll start with the
 # merge LEHD and Moody's; calculate difference in job totals
 tot_check <- lehd %>% select(stcofips, job_tot) %>%
   left_join(totemp15, by="stcofips") %>%
-  mutate(m_tot = y2015 * 1000,
-         delta = job_tot - m_tot,
-         percent_delta = delta / m_tot) %>% filter(!is.na(m_tot))
+  mutate(moodys = y2015 * 1000,
+         delta = job_tot - moodys,
+         percent_delta = delta / moodys) %>% filter(!is.na(moodys))
 ```
 
 Here's a plot:
 
-```{r tot_check_plot, echo = FALSE, messages = FALSE, dependson = c("prep_lehd", "prep_moodys")}
+```{r tot_check_plot, echo = FALSE, message = FALSE, dependson = c("prep_lehd", "prep_moodys")}
 # In most counties, the difference in total jobs is pretty small
 ggplot(tot_check) +
   geom_histogram(aes(x = percent_delta)) +
   labs(title = "Percent Difference in Job Totals by County, LEHD less Moody's",
-       x = "Percent difference (LEHD minus Moody's")
+       x = "Percent difference (LEHD minus Moody's)")
 ```
 
 In total, LEHD undershoots Moody's by just under 3.8M jobs, or a little less than 3 percent.
 
-```{r tot_check_sums, dependson=  c("prep_lehd", "prep_moodys")}
-sum(tot_check$delta, na.rm=TRUE)
-sum(tot_check$delta, na.rm=TRUE) / sum(tot_check$m_tot, na.rm=TRUE)
-```
+`sum(tot_check$delta, na.rm=TRUE)`
+`sum(tot_check$delta, na.rm=TRUE) / sum(tot_check$moodys, na.rm=TRUE)`
 
-Next, we can look at differences by sector, and see that there are some significant differences there.
+
+Next, we can look at differences by sector. Here I'm gathering the LEHD data by industry, recoding the NAICS classifications to match the Moody's abbreviations, joining in the Moody's data, summarizing by industry, and calculating some differences. (I exclude NAICS sector 11 - logging - here because it's a different concept than what's in the Moody's data.)
 
 ```{r industry_tot, dependson=c("prep_lehd", "prep_moodys")}
 # now check by naics sector across all counties
@@ -106,33 +110,41 @@ naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
   select(-naics2) %>%
   left_join(select(emp, stcofips, naics, y2015), by=c("stcofips", "naics")) %>%
   select(-stcofips) %>% group_by(naics) %>% summarise_all(sum, na.rm=TRUE) %>%
-  mutate(m_tot = y2015 * 1000,
-         delta = jobs - m_tot,
-         percent_delta = delta / m_tot, 
+  mutate(moodys = y2015 * 1000,
+         delta = jobs - moodys,
+         percent_delta = delta / moodys, 
          short_name = gsub("naics_", "", naics)) %>%
-  filter(!is.na(m_tot), naics!="naics_11") 
+  filter(!is.na(moodys), naics!="naics_11") %>%
+  dplyr::rename(LEHD = jobs)
 
 ```
 
-We can see some substantial differences in jobs counts by sector, especially in education (61), government (GV), utilities (22), and other services (81).
+The plots below show the results: job counts by sector across the two data sources. Mostly, they look pretty close, but we can see some substantial differences in jobs counts by sector, both in absolute terms and on a percentage basis. The sectors with especially large differences are education (61), government (GV), utilities (22), and other services (81), and to some extent health care (62).
+
+Some possible sources of this discrepancy could include: 
+
+  * The LEHD LODES data reflect jobs - that is, a relationship between an individual SSN and an employer EIN with at least $1 in earnings, as captured in state UI records - that existed at the beginning of the second quarter (i.e. the quarter running April 1 to June 30). Moody's employment estimates don't have a specific time of year associated with them. Employment in education can vary substantially by season with the school calendar.
+  * The somewhat reciprocal gaps in government and education could potentially reflect differences in how the two sources classify employees who work at public educational institutions or hospitals.
 
 ```{r industry_tot_plots, dependson="industry_tot"}
 # plot job counts by sector
-ggplot(gather(naics_check, key = "source", value = "job_ct", jobs, m_tot)) +
-  geom_col(aes(x = reorder(short_name, -job_ct), y = job_ct, group = source,
-               fill = source), position = "dodge") +
+ggplot(gather(naics_check, key = "Source", value = "job_ct", LEHD, moodys)) +
+  geom_col(aes(x = reorder(short_name, -job_ct), y = job_ct, group = Source,
+               fill = Source), position = "dodge") +
   labs(title = "Job Totals by Sector, LEHD vs. Moody's, 2015",
-       x = "Sector", "Jobs")
+       x = "Sector", y = "Jobs")
 
 
 # by industry, percentage differences are mostly small except in 61, 22, GV, 81
 ggplot(naics_check) +
-  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta*100))
+  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta*100)) +
+  labs(title = "Percent difference in job totals by sector, LEHD vs. Moody's",
+       x = "Sector", y= "Percentage difference")
 ```
 
 ## Compare across geography
 
-The national totals probably mask some regional differences, so we can compare metro area job totals by sector to see whether there are any particularly wide gaps between the two sources.
+The national totals probably mask some important regional differences, so we can compare metro area job totals by sector to see whether there are any particularly wide gaps between the two sources.
 
 ```{r met_totals, dependson=c("prep_lehd", "prep_moodys")}
 # collapse job totals to metro
@@ -140,18 +152,50 @@ met_check <- lehd %>% select(stcofips, job_tot) %>%
   left_join(totemp15, by="stcofips") %>%
   left_join(select(cbsa_xwalk, stcofips, cbsa, top100), by="stcofips") %>%
   select(-stcofips, -industry) %>% group_by(cbsa) %>% summarize_all(sum, na.rm=TRUE) %>%
-  mutate(m_tot = y2015 * 1000,
-         delta = job_tot - m_tot,
-         percent_delta = delta / m_tot) %>% 
-  filter(top100 > 0)
+  mutate(moodys = y2015 * 1000,
+         delta = job_tot - moodys,
+         percent_delta = delta / moodys) %>% 
+  filter(top100 > 0) %>%
+  left_join(distinct(select(cbsa_xwalk, cbsa, cbsa_name)), by="cbsa") %>%
+    mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
 
+# plot absolute deltas
 ggplot(met_check) +
   geom_col(aes(x = reorder(cbsa, -delta), y = delta)) +
+  labs(title = "Absolute difference in total employment by metro, LEHD vs. Moody's",
+       x = " ", y = "Difference") +
+  theme(axis.text.x = element_text(color = "#FFFFFF"))
+
+# plot percentage deltas
+ggplot(met_check) +
+  geom_col(aes(x = reorder(cbsa, -percent_delta), y = percent_delta)) +
+  labs(title = "Percent difference in total employment by metro, LEHD vs. Moody's",
+       x = " ", y = "% Difference") +
+  theme(axis.text.x = element_text(color = "#FFFFFF"))
   
 ```
 
-```{r}
-met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
+There are too many metros in these plots, so it's hard to identify which metros are the biggest outliers here. The first plot below looks at only metros with LEHD employment more than 5 percent above or below Moody's - about twice the national gap.
+
+```{r subset_met_totals, dependson = c("prep_lehd", "prep_moodys")}
+
+wide_gap_metros <- unique(select(filter(met_check, abs(percent_delta) > 0.05), cbsa))
+
+# plot percentage deltas again for those places with roughly twice the national delta
+ggplot(filter(met_check, cbsa %in% wide_gap_metros$cbsa)) +
+  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta*100)) +
+  labs(title = "Percent difference in total employment by metro, LEHD vs. Moody's",
+       x = "Metro", y = "% Difference") +
+  theme(axis.text.x = element_text(angle = 45, vjust=0.6))
+```
+
+
+The following plot shows how those differences are distributed across industries in these metros. 
+
+```{r met_industry_totals, dependson = c("prep_lehd", "prep_moodys")}
+# calculate metro area job counts by industry, merge in Moody's
+met_naics_check <- lehd %>% select(stcofips, job_tot, contains("naics")) %>%
   gather(key = "naics", value ="jobs", -stcofips, -job_tot) %>%
   mutate(naics2 = gsub("naics_", "", naics),
          naics2 = ifelse(naics2=="31to33", "MF",
@@ -164,7 +208,22 @@ met_naics_check <- lehd %>% select(stcofips, contains("naics")) %>%
   left_join(select(cbsa_xwalk, stcofips, cbsa, top100), by="stcofips") %>%
   filter(top100==1) %>%
   select(-stcofips) %>% group_by(cbsa, naics) %>% summarize_all(sum, na.rm=TRUE) %>%
-  mutate(m_tot = y2015 * 1000,
-         delta = jobs - m_tot)
+  mutate(moodys = y2015 * 1000,
+         delta = jobs - moodys,
+         percent_delta = delta / moodys) %>% 
+  filter(top100 > 0) %>%
+  left_join(distinct(select(cbsa_xwalk, cbsa, cbsa_name)), by="cbsa") %>%
+  mutate(short_name = substr(cbsa_name, 1, regexpr("-", cbsa_name)-1),
+         short_name = ifelse(short_name=="", cbsa_name, short_name))
+
+# plot percentage deltas again for those places with roughly twice the national delta
+ggplot(filter(met_naics_check, cbsa %in% wide_gap_metros$cbsa, naics!="naics_11")) +
+  geom_col(aes(x = reorder(short_name, -percent_delta), y = percent_delta*100,
+               fill = naics), position = "fill") +
+  labs(title = "Percent difference in total employment by metro, LEHD vs. Moody's",
+       x = "Metro", y = "% Difference") +
+  theme(axis.text.x = element_text(angle = 45, vjust=0.6))
+
 ```
+
 

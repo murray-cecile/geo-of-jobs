@@ -31,8 +31,8 @@ tract_area %<>% mutate(tract = padz(as.character(GEOID)),
 # BRING IN LEHD DATA
 #============================================================#
 
-setwd(paste0(lehd_dir, "/wac_2015"))
-raw_lehd <- read.dta13("2015_ALL_wac.dta")
+setwd(paste0(lehd_dir, "/wac_JT00_2015"))
+raw_lehd <- read.dta13("2015_ALL_wac_JT00.dta")
 setwd(here())
 
 # collapse to tract, merge with land area data
