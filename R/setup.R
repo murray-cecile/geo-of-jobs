@@ -9,7 +9,7 @@
 # loads required packages
 libs <- c("tidyverse", "magrittr", "stringr", "readr", "openxlsx", "janitor", "sp",
           "maptools", "tigris", "censusapi", "broom", "here", "foreign", "readstata13",
-          "sf")
+          "sf", "leaflet", "plotly", "shiny", "sp", "rgdal")
 lapply(libs, library, character.only=TRUE)
 
 #============================================================#
