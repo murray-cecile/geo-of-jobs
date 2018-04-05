@@ -61,7 +61,7 @@ summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk
   
   cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
     filter(top100==1)
-  rv <- df %>% select(-tract, -cbsa_name, -dense_cat) 
+  rv <- df %>% select(-tract, -cbsa_name, -dense_cat) %>% mutate(tr_ct = 1)
   
   if(length(f)==1){
     rv %<>% group_by(cbsa) %>% summarize_all(funs(!!f)) 
@@ -70,11 +70,12 @@ summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk
   }
   
   rv %<>% left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>%
-    select(cbsa, cbsa_name, starts_with(var), most_dense_sum, density_min)
+    select(cbsa, cbsa_name, starts_with(var), most_dense_sum, density_min, tr_ct_sum)
 
   return(rv)
 }
 
-met_summary <- summarize_by_metro(density, var = "job_tot", f = c("sum", "min"))
+met_summary <- summarize_by_metro(density, var = "job_tot", f = c("sum", "min")) %>%
+  filter(cbsa %in% top100_xwalk$cbsa)
 
 

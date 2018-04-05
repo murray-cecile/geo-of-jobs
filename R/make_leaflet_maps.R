@@ -20,19 +20,20 @@ top100_xwalk <- cbsa_xwalk %>% filter(top100==1) %>%
 
 # function to filter down to tracts only in a given cbsa
 select_cbsa_tracts <- function(df, cbsa_id, xwalk = top100_xwalk) {
-  ctys <- filter(xwalk, cbsa==cbsa_id)
-  rv <- df %>% filter(substr(tract, 1, 5) %in% ctys$stcofips)
+  ctys <- dplyr::filter(xwalk, cbsa==cbsa_id)
+  rv <- df %>% dplyr::filter(substr(tract, 1, 5) %in% ctys$stcofips)
   return(rv)
 }
 
-# chi <- select_cbsa_tracts(density, "16980")
+cbsa <- select_cbsa_tracts(density, "12580") 
+
 
 #============================================================#
-# LEAFLET
+# PREP A SHAPEFILE
 #============================================================#
 
 # make tract shapefile
-tracts.shp <- readOGR("tracts.shp")
+# tracts.shp <- readOGR("tracts.shp")
 
 # function to produce the trimmed shapefile
 create_cbsa_shp <- function(cbsa_tracts, tr.shp = tracts.shp){
@@ -42,36 +43,186 @@ create_cbsa_shp <- function(cbsa_tracts, tr.shp = tracts.shp){
   return(cbsa.shp)
 }
 
-chi.shp <- create_cbsa_shp(chi)
+cbsa.shp <- create_cbsa_shp(cbsa)
 
-chi <- leaflet(chi.shp) %>%
-  setView(lng = -87.6298, lat = 41.8782, zoom = 10) %>%
+check <- cbsa.shp@data
+
+#============================================================#
+# LEAFLET
+#============================================================#
+
+# create labels
+labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs / mi<sup>2</sup>",
+                  cbsa.shp@data$tract, cbsa.shp@data$density) %>%
+  lapply(htmltools::HTML)
+
+# create color scheme
+pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+                 cbsa$most_dense, bin = 2)
+
+# simple map of clusters
+cbsa.hub <- leaflet(cbsa.shp) %>%
+  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
   addTiles() %>%
   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
-              opacity = 1, fillOpacity = 0.75, 
-              fillColor = ~colorBin(c("#E0ECFB", "#00649F"),
-                                    most_dense, bins = 2)(most_dense))
-# chi
+              opacity = 1, fillOpacity = 0.75,
+              fillColor = ~pal0(most_dense),
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = labels,
+              labelOptions = labelOptions(list("font-weight" = "normal",
+                                               padding = "3px 8px"),
+                                          textsize = "15px", direction = "auto")) %>%
+  addLegend(pal = pal0, values = ~most_dense, opacity = 0.75, title = NULL,
+            position = "bottomright")
+
+cbsa.hub
+
+# create color scheme
+pal1 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+                 cbsa$dense_cat)
+
+# simple map of density deciles
+cbsa.dense <- leaflet(cbsa.shp) %>%
+  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+  addTiles() %>%
+  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+              opacity = 1, fillOpacity = 0.75,
+              fillColor = ~pal1(dense_cat),
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = labels,
+              labelOptions = labelOptions(list("font-weight" = "normal",
+                                               padding = "3px 8px"),
+                                          textsize = "15px", direction = "auto")) %>%
+  addLegend(pal = pal1, values = ~dense_cat, opacity = 0.75, title = NULL,
+            position = "bottomright")
+
+cbsa.dense
+
+labels2 <-sprintf("<strong>Tract %s</strong><br/>%g total jobs",
+                  cbsa.shp@data$tract, cbsa.shp@data$job_tot) %>%
+  lapply(htmltools::HTML)
+
+# create color scheme
+pal2 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+                 cbsa$job_tot, bins = 10)
+
+# simple map of density deciles
+cbsa.tot <- leaflet(cbsa.shp) %>%
+  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+  addTiles() %>%
+  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+              opacity = 1, fillOpacity = 0.75,
+              fillColor = ~pal2(job_tot),
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = labels2,
+              labelOptions = labelOptions(list("font-weight" = "normal",
+                                               padding = "3px 8px"),
+                                          textsize = "15px", direction = "auto")) %>%
+  addLegend(pal = pal2, values = ~job_tot, opacity = 0.75, title = NULL,
+            position = "bottomright")
+
+cbsa.tot
 
 
 
 #============================================================#
-# PLOTLY
+# JUST MAP JOB COUNTS
 #============================================================#
 
-tracts.df <- tracts.shp %>% tidy(region = "GEOID")
+# create labels
+labels1 <- sprintf("<strong>Tract %s</strong><br/>%g jobs / mi<sup>2</sup>",
+                  cbsa$tract, cbsa$density) %>%
+  lapply(htmltools::HTML)
 
-# trim the shapefile
-oh.df <- filter(tracts.shp, substr(id, 1, 2)=="39") %>%
-  dplyr::rename(tract = id)
-il.df <- filter(tracts.shp, substr(id, 1, 2)=="17") %>%
-  dplyr::rename(tract = id)
+# create color scheme
+pal1 <- colorQuantile(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+                 cbsa$job_tot)
 
-# select data for OH
-ohdata <- density %>% select(tract, job_tot, density, dense_cat, most_dense) %>%
-  filter(substr(tract, 1, 2)=="39") %>%
-  left_join(oh.df, by="tract")
+# simple map of clusters
+cbsa.hub <- leaflet(cbsa.shp) %>%
+  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+  addTiles() %>%
+  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+              opacity = 1, fillOpacity = 0.75,
+              fillColor = ~pal1(job_tot),
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = labels,
+              labelOptions = labelOptions(list("font-weight" = "normal",
+                                               padding = "3px 8px"),
+                                          textsize = "15px", direction = "auto")) %>%
+  addLegend(pal = pal0, values = ~job_tot, opacity = 0.75, title = NULL,
+            position = "bottomright")
 
-# ggplot
-m <- ggplot(ohdata) +
-  geom_polygon
+cbsa.hub
+
+# # create color scheme
+# pal1 <- function(dense_cat) {
+#   colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+#                 chi$dense_cat, bin = 10) 
+#   }
+# 
+# # attempt to layer on clusters
+# chi.map <- leaflet(chi.shp) %>%
+#   setView(lng = -87.6298, lat = 41.8782, zoom = 10) %>%
+#   addTiles() %>%
+#   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.75, 
+#               fillColor = ~pal1(dense_cat), 
+#               highlight = highlightOptions(
+#                 weight = 5, 
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7, 
+#                 bringToFront = TRUE),
+#               label = labels, 
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                           padding = "3px 8px"),
+#               textsize = "15px", direction = "auto")) %>%
+#   addLegend(pal = pal, values = ~dense_cat, opacity = 0.75, title = NULL,
+#             position = "bottomright")
+
+# chi.map
+
+
+
+ 
+# #============================================================#
+# # PLOTLY
+# #============================================================#
+# 
+# tracts.df <- tracts.shp %>% tidy(region = "GEOID")
+# 
+# # trim the shapefile
+# oh.df <- filter(tracts.shp, substr(id, 1, 2)=="39") %>%
+#   dplyr::rename(tract = id)
+# il.df <- filter(tracts.shp, substr(id, 1, 2)=="17") %>%
+#   dplyr::rename(tract = id)
+# 
+# # select data for OH
+# ohdata <- density %>% select(tract, job_tot, density, dense_cat, most_dense) %>%
+#   filter(substr(tract, 1, 2)=="39") %>%
+#   left_join(oh.df, by="tract")
+# 
+# # ggplot
+# m <- ggplot(ohdata) +
+#   geom_polygon
