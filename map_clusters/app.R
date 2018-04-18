@@ -1,53 +1,59 @@
+##==================================================================================##
+# GEO OF JOBS: SHINY APP FOR JOB CLUSTER VIZ
+#  Creates interactive map with dropdown 
 #
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
+# Cecile Murray
+# April 2018
+##==================================================================================##
 
 library(shiny)
 
 # loading necessary data and functions
 library(here)
-source(here("R"," make_leaflet_maps.R"))
+source(here("R","make_leaflet_maps.R"))
 
 
 # Define UI for map application 
 ui <- fluidPage(
    
    # Application title
-   titlePanel("Job clusters in U.S. metros"),
-   p("This map displays tracts with job density in the top 5% of the distribution in their metro."),
-   div(),
+   titlePanel("Job density in U.S. metros"),
+   
+   # header for cluster maps
+   h3("Job clusters"),
+   
+   # MAKE THIS ADJUST FOR EACH METRO
+   p("This map displays job density (jobs per square mile) by census tract. 
+     Census tracts with job density at the top part of the distribution in their metro are highlighted."),
+   br(),
    
    # select box for metro names
    selectInput("cbsa_name",
                label = "Choose a metro area",
-               choices = unique(cbsa_xwalk$cbsa_name[cbsa_xwalk$top100==1]),
+               choices = sort(unique(cbsa_xwalk$cbsa_name[cbsa_xwalk$top100==1])),
                selected = "Baltimore-Columbia-Towson, MD"),
+   br(),
    
-    # leaflet map
+   # radio buttons
+   radioButtons("radio", label = h3("Density threshold"),
+                choices = list("Top 5 percent" = 1, 
+                               "Top 10 percent" = 2,
+                               "Top 20 percent" = 3),
+                selected = 2),
+   br(),
+   
+    # leaflet map of the job clusters
    leafletOutput("cbsa"),
    
-   # test splotch
-   textOutput("test_text")
-   
+   # Source line for the map
+   textOutput("source")
 )
 
 # Define server logic required to draw map
 server <- function(input, output) {
   
-  # # get CBSA name from user input
-  # cbsa_name <- renderPrint({ input$select})
+  output$print_radio <- renderPrint({input$radio == "2"})
   
-  # set latitude and longitude
-  
-  # create color scheme
-  pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-                   cbsa$most_dense, bin = 2)
-
   # draw the map
   output$cbsa <- renderLeaflet({
 
@@ -55,6 +61,15 @@ server <- function(input, output) {
     cbsa_name <- input$cbsa_name
     cbsa_id <- unique(top100_xwalk$cbsa[top100_xwalk$cbsa_name==cbsa_name])
 
+    # get the selected density threshold from user input, rename variable
+    thresh <- "default"
+    thresh <- case_when(
+      input$radio == 1 ~ "most_dense_20",
+      input$radio == 2 ~ "most_dense_10",
+      input$radio == 3 ~ "most_dense_5"
+    )
+    density %<>% dplyr::rename(most_dense = !!thresh)
+    
     # select tracts in that CBSA
     cbsa <- select_cbsa_tracts(density,
                                cbsa_id,
@@ -67,10 +82,18 @@ server <- function(input, output) {
     coords <- filter(top100_coords, cbsa==cbsa_id)
 
     # set labels
-    labels <-sprintf("<strong>Tract %s</strong><br/>%g jobs / mi <sup> 2 </sup",
-                      cbsa.shp@data$tract, cbsa.shp@data$density) %>%
+    labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
+                      cbsa.shp@data$tract, cbsa.shp@data$job_tot, cbsa.shp@data$ALAND_SQMI,
+                      cbsa.shp@data$density) %>%
       lapply(htmltools::HTML)
     
+    
+    # create color scheme
+    # pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+    #                  cbsa$most_dense_10, bins = 2)
+    pal0 <- colorFactor(c("#E0ECFB", "#FFCF1A"), as.factor(cbsa$most_dense))
+    
+    # make the leaflet map
     leaflet(cbsa.shp) %>%
       setView(lng = coords$lon, lat = coords$lat, zoom = 9) %>%
       addTiles() %>%

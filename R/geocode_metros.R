@@ -20,12 +20,14 @@ top100_coords <- top100_xwalk %>% select(cbsa, cbsa_name) %>% distinct() %>%
 
 for(i in seq_along(top100)[1:100]) {
   
-  if(is.na(top100_coords$lat[i])){
+  # skip if already filled in
+  if(top100_coords$lat[i]==0 & top100_coords$lon[i]==0 | is.na(top100_coords$lat[i])){
     latlon <- geocode(top100[i], "latlon", "google")
     top100_coords$lat[top100_coords$cbsa_name==top100[i]] <- latlon$lat
     top100_coords$lon[top100_coords$cbsa_name==top100[i]] <- latlon$lon
-    Sys.sleep(10)
+    Sys.sleep(5)
   } else {
+    # Sys.sleep(5)
     next
   }
   

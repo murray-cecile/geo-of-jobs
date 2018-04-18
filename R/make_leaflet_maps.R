@@ -25,7 +25,7 @@ select_cbsa_tracts <- function(df, cbsa_id, xwalk = top100_xwalk) {
   return(rv)
 }
 
-cbsa <- select_cbsa_tracts(density, "12580") 
+cbsa <- select_cbsa_tracts(density, "41860") 
 
 
 #============================================================#
@@ -35,10 +35,13 @@ cbsa <- select_cbsa_tracts(density, "12580")
 # make tract shapefile
 # tracts.shp <- readOGR("tracts.shp")
 
+density %<>% arrange(tract, job_tot, ALAND_SQMI, density)
+
 # function to produce the trimmed shapefile
 create_cbsa_shp <- function(cbsa_tracts, tr.shp = tracts.shp){
   
-  cbsa.shp <- geo_join(tr.shp, select(cbsa_tracts, tract, job_tot, density, dense_cat, most_dense),
+  cbsa.shp <- geo_join(tr.shp, select(cbsa_tracts, tract, job_tot, density, ALAND_SQMI,
+                                      contains("dense_cat"), contains("most_dense")),
                        by_sp = "GEOID", by_df = "tract", how = "inner")
   return(cbsa.shp)
 }
@@ -47,133 +50,156 @@ cbsa.shp <- create_cbsa_shp(cbsa)
 
 check <- cbsa.shp@data
 
+# create map var so we can make 
+
 #============================================================#
 # LEAFLET
 #============================================================#
 
 # create labels
-labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs / mi<sup>2</sup>",
-                  cbsa.shp@data$tract, cbsa.shp@data$density) %>%
+labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
+                  cbsa.shp@data$tract, cbsa.shp@data$job_tot, cbsa.shp@data$ALAND_SQMI,
+                  cbsa.shp@data$density) %>%
   lapply(htmltools::HTML)
 
-# create color scheme
-pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-                 cbsa$most_dense, bin = 2)
-
-# simple map of clusters
-cbsa.hub <- leaflet(cbsa.shp) %>%
-  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
-  addTiles() %>%
-  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
-              opacity = 1, fillOpacity = 0.75,
-              fillColor = ~pal0(most_dense),
-              highlight = highlightOptions(
-                weight = 5,
-                color = "#666",
-                dashArray = "",
-                fillOpacity = 0.7,
-                bringToFront = TRUE),
-              label = labels,
-              labelOptions = labelOptions(list("font-weight" = "normal",
-                                               padding = "3px 8px"),
-                                          textsize = "15px", direction = "auto")) %>%
-  addLegend(pal = pal0, values = ~most_dense, opacity = 0.75, title = NULL,
-            position = "bottomright")
-
-cbsa.hub
-
-# create color scheme
-pal1 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-                 cbsa$dense_cat)
-
-# simple map of density deciles
-cbsa.dense <- leaflet(cbsa.shp) %>%
-  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
-  addTiles() %>%
-  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
-              opacity = 1, fillOpacity = 0.75,
-              fillColor = ~pal1(dense_cat),
-              highlight = highlightOptions(
-                weight = 5,
-                color = "#666",
-                dashArray = "",
-                fillOpacity = 0.7,
-                bringToFront = TRUE),
-              label = labels,
-              labelOptions = labelOptions(list("font-weight" = "normal",
-                                               padding = "3px 8px"),
-                                          textsize = "15px", direction = "auto")) %>%
-  addLegend(pal = pal1, values = ~dense_cat, opacity = 0.75, title = NULL,
-            position = "bottomright")
-
-cbsa.dense
-
-labels2 <-sprintf("<strong>Tract %s</strong><br/>%g total jobs",
-                  cbsa.shp@data$tract, cbsa.shp@data$job_tot) %>%
-  lapply(htmltools::HTML)
-
-# create color scheme
-pal2 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-                 cbsa$job_tot, bins = 10)
-
-# simple map of density deciles
-cbsa.tot <- leaflet(cbsa.shp) %>%
-  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
-  addTiles() %>%
-  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
-              opacity = 1, fillOpacity = 0.75,
-              fillColor = ~pal2(job_tot),
-              highlight = highlightOptions(
-                weight = 5,
-                color = "#666",
-                dashArray = "",
-                fillOpacity = 0.7,
-                bringToFront = TRUE),
-              label = labels2,
-              labelOptions = labelOptions(list("font-weight" = "normal",
-                                               padding = "3px 8px"),
-                                          textsize = "15px", direction = "auto")) %>%
-  addLegend(pal = pal2, values = ~job_tot, opacity = 0.75, title = NULL,
-            position = "bottomright")
-
-cbsa.tot
+# # create color scheme for job hubs
+# pal0 <- colorFactor(c("#000000", "#FFCF1A"), as.factor(cbsa$most_dense_10))
+# 
+# # create color scheme for job density
+# pal1 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+#                  cbsa$dense_cat)
+# 
+# # returns a palette function determined by whether the tract is a cluster 
+# master_pal <- function() {
+#   
+# }
+# 
+# 
+# # simple map of clusters
+# cbsa.hub <- leaflet(cbsa.shp) %>%
+#   setView(lng = -122.08080, lat = 37.662, zoom = 10) %>%
+#   addTiles() %>%
+#   addPolygons(color = ~pal0(most_dense_10), weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.75,
+#               fillColor = ~pal1(dense_cat_10),
+#               highlight = highlightOptions(
+#                 weight = 5,
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7,
+#                 bringToFront = TRUE),
+#               label = labels,
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                                padding = "3px 8px"),
+#                                           textsize = "15px", direction = "auto"))
+# %>%
+#   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.3,
+#               fillColor = ~pal0(most_dense),
+#               highlight = highlightOptions(
+#                 weight = 5,
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7,
+#                 bringToFront = TRUE),
+#               label = labels,
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                                padding = "3px 8px"),
+#                                           textsize = "15px", direction = "auto")) %>%
+#   addLegend(pal = pal1, values = ~most_dense_10, opacity = 0.75, title = NULL,
+#             position = "bottomright")
+# cbsa.hub
 
 
+# 
+# # simple map of density deciles
+# cbsa.dense <- leaflet(cbsa.shp) %>%
+#   setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+#   addTiles() %>%
+#   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.75,
+#               fillColor = ~pal1(dense_cat),
+#               highlight = highlightOptions(
+#                 weight = 5,
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7,
+#                 bringToFront = TRUE),
+#               label = labels,
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                                padding = "3px 8px"),
+#                                           textsize = "15px", direction = "auto")) %>%
+#   addLegend(pal = pal1, values = ~dense_cat, opacity = 0.75, title = NULL,
+#             position = "bottomright")
+# 
+# cbsa.dense
 
-#============================================================#
-# JUST MAP JOB COUNTS
-#============================================================#
+# labels2 <-sprintf("<strong>Tract %s</strong><br/>%g total jobs",
+#                   cbsa.shp@data$tract, cbsa.shp@data$job_tot) %>%
+#   lapply(htmltools::HTML)
+# 
+# # create color scheme
+# pal2 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+#                  cbsa$job_tot, bins = 10)
+# 
+# # simple map of density deciles
+# cbsa.tot <- leaflet(cbsa.shp) %>%
+#   setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+#   addTiles() %>%
+#   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.75,
+#               fillColor = ~pal2(job_tot),
+#               highlight = highlightOptions(
+#                 weight = 5,
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7,
+#                 bringToFront = TRUE),
+#               label = labels2,
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                                padding = "3px 8px"),
+#                                           textsize = "15px", direction = "auto")) %>%
+#   addLegend(pal = pal2, values = ~job_tot, opacity = 0.75, title = NULL,
+#             position = "bottomright")
+# 
+# cbsa.tot
 
-# create labels
-labels1 <- sprintf("<strong>Tract %s</strong><br/>%g jobs / mi<sup>2</sup>",
-                  cbsa$tract, cbsa$density) %>%
-  lapply(htmltools::HTML)
 
-# create color scheme
-pal1 <- colorQuantile(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-                 cbsa$job_tot)
 
-# simple map of clusters
-cbsa.hub <- leaflet(cbsa.shp) %>%
-  setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
-  addTiles() %>%
-  addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
-              opacity = 1, fillOpacity = 0.75,
-              fillColor = ~pal1(job_tot),
-              highlight = highlightOptions(
-                weight = 5,
-                color = "#666",
-                dashArray = "",
-                fillOpacity = 0.7,
-                bringToFront = TRUE),
-              label = labels,
-              labelOptions = labelOptions(list("font-weight" = "normal",
-                                               padding = "3px 8px"),
-                                          textsize = "15px", direction = "auto")) %>%
-  addLegend(pal = pal0, values = ~job_tot, opacity = 0.75, title = NULL,
-            position = "bottomright")
-
-cbsa.hub
+# #============================================================#
+# # JUST MAP JOB COUNTS
+# #============================================================#
+# 
+# # create labels
+# labels1 <- sprintf("<strong>Tract %s</strong><br/>%g jobs / mi<sup>2</sup>",
+#                   cbsa$tract, cbsa$density) %>%
+#   lapply(htmltools::HTML)
+# 
+# # create color scheme
+# pal1 <- colorQuantile(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
+#                  cbsa$job_tot)
+# 
+# # simple map of clusters
+# cbsa.hub <- leaflet(cbsa.shp) %>%
+#   setView(lng = -76.6122, lat = 39.2904, zoom = 10) %>%
+#   addTiles() %>%
+#   addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+#               opacity = 1, fillOpacity = 0.75,
+#               fillColor = ~pal1(job_tot),
+#               highlight = highlightOptions(
+#                 weight = 5,
+#                 color = "#666",
+#                 dashArray = "",
+#                 fillOpacity = 0.7,
+#                 bringToFront = TRUE),
+#               label = labels,
+#               labelOptions = labelOptions(list("font-weight" = "normal",
+#                                                padding = "3px 8px"),
+#                                           textsize = "15px", direction = "auto")) %>%
+#   addLegend(pal = pal0, values = ~job_tot, opacity = 0.75, title = NULL,
+#             position = "bottomright")
+# 
+# cbsa.hub
 
 # # create color scheme
 # pal1 <- function(dense_cat) {

@@ -46,36 +46,64 @@ density <- compute_tract_density(lehd, tract_area, var = job_tot, cbsa = cbsa_xw
 # flag tracts in the xth percentile of density by cbsa
 flag_dense_tracts <- function(df, num_cats) {
   
+  cat_name <- paste0("dense_cat_", num_cats)
+  dense_name <- paste0("most_dense_", num_cats)
+  map_name <- paste0("map_var_", num_cats)
+  
   rv <- df %>% group_by(cbsa) %>%
-    mutate(dense_cat = ntile(density, num_cats),
-           most_dense = ifelse(dense_cat==num_cats, 1, 0)) %>%
+    mutate(UQ(cat_name) := ntile(density, num_cats)) %>%
     ungroup()
   
+  # create boolean for top ntile
+  rv[, c(dense_name)] <- as.vector(rv[, c(cat_name)]==num_cats)
+  
+  # # create factor for mapping
+  # rv[, c(map_name)] <- "Z"
+  # rv[, c(map_name)] <- case_when(
+  #   rv[, most_dense_5]==1 & rv[, ]
+  # )
+  
   return(rv)
 }
 
-density %<>% flag_dense_tracts(20)
+density %<>% flag_dense_tracts(20) %>% 
+  flag_dense_tracts(10) %>% 
+  flag_dense_tracts(5) 
 
-# summarize to 100 metrs
-summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk) {
-  
-  cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
-    filter(top100==1)
-  rv <- df %>% select(-tract, -cbsa_name, -dense_cat) %>% mutate(tr_ct = 1)
-  
-  if(length(f)==1){
-    rv %<>% group_by(cbsa) %>% summarize_all(funs(!!f)) 
-  } else {
-    rv %<>% group_by(cbsa) %>% summarize_all(funs_(f)) 
-  }
-  
-  rv %<>% left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>%
-    select(cbsa, cbsa_name, starts_with(var), most_dense_sum, density_min, tr_ct_sum)
+# recode_density <- function(df, num_cats) {
+#   
+#   cat_name <- paste0("dense_cat_", num_cats)
+#   dense_name <- paste0("most_dense_", num_cats)
+#   map_var <- paste0("map_var_", num_cats)
+#   
+#   rv <- mutate(df,UQ(map_var) := case_when())
+#   
+# }
 
-  return(rv)
-}
+#============================================================#
+# METRO SUMMARIES
+#============================================================#
 
-met_summary <- summarize_by_metro(density, var = "job_tot", f = c("sum", "min")) %>%
-  filter(cbsa %in% top100_xwalk$cbsa)
+# summarize to 100 metros
+# summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk) {
+#   
+#   cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
+#     filter(top100==1)
+#   rv <- df %>% select(-tract, -cbsa_name, -dense_cat) %>% mutate(tr_ct = 1)
+#   
+#   if(length(f)==1){
+#     rv %<>% group_by(cbsa) %>% summarize_all(funs(!!f)) 
+#   } else {
+#     rv %<>% group_by(cbsa) %>% summarize_all(funs_(f)) 
+#   }
+#   
+#   rv %<>% left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>%
+#     select(cbsa, cbsa_name, starts_with(var), most_dense_sum, density_min, tr_ct_sum)
+# 
+#   return(rv)
+# }
+# 
+# met_summary <- summarize_by_metro(density, var = "job_tot", f = c("sum", "min")) %>%
+#   filter(cbsa %in% top100_xwalk$cbsa)
 
 
