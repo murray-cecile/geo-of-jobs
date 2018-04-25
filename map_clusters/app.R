@@ -7,11 +7,19 @@
 ##==================================================================================##
 
 library(shiny)
+library(tidyverse)
+library(magrittr)
+library(sp)
+library(sf)
+library(rgdal)
+library(stringr)
+library(janitor)
+library(tigris)
+library(foreign)
+library(leaflet)
 
 # loading necessary data and functions
-library(here)
-source(here("R","make_leaflet_maps.R"))
-
+source("prepare_data.R")
 
 # Define UI for map application 
 ui <- fluidPage(
@@ -46,7 +54,17 @@ ui <- fluidPage(
    leafletOutput("cbsa"),
    
    # Source line for the map
-   textOutput("source")
+   textOutput("source"),
+   br(),
+   
+   # Descriptive stats
+   h4("Descriptive stats for this metro area:"),
+   
+   fluidRow(
+   tableOutput("descriptive_stats"),
+   plotOutput("distribution")
+   )
+
 )
 
 # Define server logic required to draw map
@@ -121,6 +139,27 @@ server <- function(input, output) {
     # cbsa_name <- input$cbsa_name
     # coords <- filter(top100_coords, cbsa==cbsa_id)
     # paste("These are supposed to be the coordinates:", coords$lon, coords$lat)
+  })
+  
+  # creates table of descriptive stats
+  output$descriptive_stats <- renderTable ({
+    filter(select(met_summary, cbsa_name, tr_ct_sum,
+                  job_tot_sum, contains("most_dense")), cbsa_name==input$cbsa_name) %>%
+      dplyr::rename(CBSA = cbsa_name, 
+                    `Number of tracts` = tr_ct_sum,
+                    `Total jobs` = job_tot_sum,
+                    `Tracts in top 20%` = most_dense_5_sum,
+                    `Tracts in top 10%` = most_dense_10_sum,
+                    `Tracts in top 5%` = most_dense_20_sum) %>%
+      gather()
+  }, colnames = FALSE)
+  
+  # creates density plot
+  output$distribution <- renderPlot({
+    ggplot(filter(density, cbsa_name==input$cbsa_name)) +
+      geom_histogram(aes(x = density), binwidth=25, color = "#00649F") +
+      labs(x = "Jobs per square mile", y = "") +
+      xlim(0, 30000)
   })
   
 }

@@ -1,0 +1,12 @@
+name: map_clusters
+title: map_clusters
+username:
+account: murray-cecile
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 328316
+bundleId: 1333960
+url: https://murray-cecile.shinyapps.io/map_clusters/
+when: 1524506660.50298
+asMultiple: FALSE
+asStatic: FALSE

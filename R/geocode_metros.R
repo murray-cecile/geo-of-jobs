@@ -27,8 +27,10 @@ for(i in seq_along(top100)[1:100]) {
     top100_coords$lon[top100_coords$cbsa_name==top100[i]] <- latlon$lon
     Sys.sleep(5)
   } else {
-    # Sys.sleep(5)
+    Sys.sleep(5)
     next
   }
   
 }
+
+# save(top100_coords, file = "map_clusters/top100_coords.Rdata")

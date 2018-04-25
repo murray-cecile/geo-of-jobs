@@ -70,6 +70,8 @@ density %<>% flag_dense_tracts(20) %>%
   flag_dense_tracts(10) %>% 
   flag_dense_tracts(5) 
 
+save(density, file = "map_clusters/LEHD_WAC_JT00_2015.Rdata")
+
 # recode_density <- function(df, num_cats) {
 #   
 #   cat_name <- paste0("dense_cat_", num_cats)
