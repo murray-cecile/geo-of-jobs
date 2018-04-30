@@ -82,11 +82,11 @@ server <- function(input, output) {
     # get the selected density threshold from user input, rename variable
     thresh <- "default"
     thresh <- case_when(
-      input$radio == 1 ~ "most_dense_20",
-      input$radio == 2 ~ "most_dense_10",
-      input$radio == 3 ~ "most_dense_5"
+      input$radio == 1 ~ "mapvar_20",
+      input$radio == 2 ~ "mapvar_10",
+      input$radio == 3 ~ "mapvar_5"
     )
-    density %<>% dplyr::rename(most_dense = !!thresh)
+    density %<>% dplyr::rename(mapvar = !!thresh)
     
     # select tracts in that CBSA
     cbsa <- select_cbsa_tracts(density,
@@ -109,7 +109,8 @@ server <- function(input, output) {
     # create color scheme
     # pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
     #                  cbsa$most_dense_10, bins = 2)
-    pal0 <- colorFactor(c("#E0ECFB", "#FFCF1A"), as.factor(cbsa$most_dense))
+    pal0 <- colorFactor(c("#FFCF1A", "#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
+                        as.factor(cbsa$mapvar))
     
     # make the leaflet map
     leaflet(cbsa.shp) %>%
@@ -117,7 +118,7 @@ server <- function(input, output) {
       addTiles() %>%
       addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
                   opacity = 1, fillOpacity = 0.75,
-                  fillColor = ~pal0(most_dense),
+                  fillColor = ~pal0(mapvar),
                   highlight = highlightOptions(
                     weight = 5,
                     color = "#666",
@@ -128,7 +129,7 @@ server <- function(input, output) {
                   labelOptions = labelOptions(list("font-weight" = "normal",
                                                    padding = "3px 8px"),
                                               textsize = "15px", direction = "auto")) %>%
-      addLegend(pal = pal0, values = ~most_dense, opacity = 0.75, title = NULL,
+      addLegend(pal = pal0, values = ~mapvar, opacity = 0.75, title = NULL,
                 position = "bottomright")
 
   })
