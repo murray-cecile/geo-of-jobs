@@ -33,7 +33,7 @@ cbsa <- select_cbsa_tracts(density, "41860")
 #============================================================#
 
 # make tract shapefile
-# tracts.shp <- readOGR("map_clusters/shp/tracts.shp")
+# tracts.shp <- readOGR("map_clusters/tracts.shp")
 
 density %<>% arrange(tract, job_tot, ALAND_SQMI, density)
 
