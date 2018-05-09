@@ -18,6 +18,9 @@ library(tigris)
 library(foreign)
 library(leaflet)
 
+# use this if running locally ONLY; comment out for Shiny server
+# setwd(paste0(here(), "/map_clusters"))
+
 # loading necessary data and functions
 source("prepare_data.R")
 
@@ -31,8 +34,9 @@ ui <- fluidPage(
    h3("Job clusters"),
    
    # MAKE THIS ADJUST FOR EACH METRO
-   p("This map displays job density (jobs per square mile) by census tract. 
-     Census tracts with job density at the top part of the distribution in their metro are highlighted."),
+   p("This dashboard explores job density (jobs per square mile) in the top 100 U.S. metro areas in 2010 and 2015. 
+     We identify job clusters as Census tracts with job density at the top part of the distribution 
+     in their metro."),
    br(),
    
    # select box for metro names
@@ -42,14 +46,23 @@ ui <- fluidPage(
                selected = "Baltimore-Columbia-Towson, MD"),
    br(),
    
-   # radio buttons
-   radioButtons("radio", label = h3("Density threshold"),
+   # split layout for radio buttons and slider
+   splitLayout(
+   
+   # radio buttons for density
+   radioButtons("radio", label = "Density threshold",
                 choices = list("Top 5 percent" = 1, 
                                "Top 10 percent" = 2,
                                "Top 20 percent" = 3),
                 selected = 2),
-   br(),
    
+   # slider for years
+   sliderInput("slider", label = "Year",
+               min = 2010, max = 2015, value = 2015, step = 5, sep = ""),
+   
+   br()
+   
+   ),
     # leaflet map of the job clusters
    leafletOutput("cbsa"),
    
@@ -60,10 +73,14 @@ ui <- fluidPage(
    # Descriptive stats
    h4("Descriptive stats for this metro area:"),
    
-   fluidRow(
+   # overview stats that are the same from year to year
+   tableOutput("overview"),
+   
+   # descriptive stats that show 2010 and 2015
    tableOutput("descriptive_stats"),
+   
+   # histogram
    plotOutput("distribution")
-   )
 
 )
 
@@ -79,6 +96,13 @@ server <- function(input, output) {
     cbsa_name <- input$cbsa_name
     cbsa_id <- unique(top100_xwalk$cbsa[top100_xwalk$cbsa_name==cbsa_name])
 
+    # get year from user input
+    if(input$slider==2010){
+      density <- density10
+    } else {
+      density <- density15
+    }
+    
     # get the selected density threshold from user input, rename variable
     thresh <- "default"
     thresh <- case_when(
@@ -122,7 +146,6 @@ server <- function(input, output) {
                   highlight = highlightOptions(
                     weight = 5,
                     color = "#666",
-                    dashArray = "",
                     fillOpacity = 0.7,
                     bringToFront = TRUE),
                   label = labels,
@@ -142,24 +165,36 @@ server <- function(input, output) {
     # paste("These are supposed to be the coordinates:", coords$lon, coords$lat)
   })
   
-  # creates table of descriptive stats
-  output$descriptive_stats <- renderTable ({
-    filter(select(met_summary, cbsa_name, tr_ct_sum,
-                  job_tot_sum, contains("most_dense")), cbsa_name==input$cbsa_name) %>%
+  # creates overview table
+  output$overview <- renderTable ({
+    
+    filter(select(met_summary15, cbsa_name, tr_ct_sum, contains("most_dense")),
+                  cbsa_name==input$cbsa_name) %>%
       dplyr::rename(CBSA = cbsa_name, 
-                    `Number of tracts` = tr_ct_sum,
-                    `Total jobs` = job_tot_sum,
+                    `Number of tracts` = tr_ct_sum,                
                     `Tracts in top 20%` = most_dense_5_sum,
                     `Tracts in top 10%` = most_dense_10_sum,
                     `Tracts in top 5%` = most_dense_20_sum) %>%
       gather()
   }, colnames = FALSE)
   
+  # creates table of desriptive stats for 2010 and 2015
+  output$descriptive_stats <- renderTable ({
+    
+    filter(select(met_summary, -cbsa), CBSA==input$cbsa_name,
+           name %in% c("Total jobs")) %>%
+      select(-CBSA) %>%
+      spread(year, n)
+  }, colnames = FALSE)
+  
   # creates density plot
   output$distribution <- renderPlot({
-    ggplot(filter(density, cbsa_name==input$cbsa_name)) +
-      geom_histogram(aes(x = density), binwidth=25, color = "#00649F") +
-      labs(x = "Jobs per square mile", y = "") +
+    ggplot() +
+      geom_histogram(data =  filter(density15, cbsa_name==input$cbsa_name),
+                     aes(x = density), binwidth=25, color = "#00649f") +
+      geom_histogram(data = filter(density10, cbsa_name==input$cbsa_name),
+                     aes(x = density), binwidth=25, color = "#8AC6FF") +
+    labs(x = "Jobs per square mile", y = "") +
       xlim(0, 30000)
   })
   

@@ -10,7 +10,7 @@
 library(here)
 source(here("R", "setup.R"))
 
-load(here("temp", "prepped_LEHD_2015.Rdata"))
+load(here("temp", "prepped_LEHD_2010.Rdata"))
 
 #============================================================#
 # PREPARE LEHD
@@ -57,12 +57,6 @@ flag_dense_tracts <- function(df, num_cats) {
   # create boolean for top ntile
   rv[, c(dense_name)] <- as.vector(rv[, c(cat_name)]==num_cats)
   
-  # # create factor for mapping
-  # rv[, c(map_name)] <- "Z"
-  # rv[, c(map_name)] <- case_when(
-  #   rv[, most_dense_5]==1 & rv[, ]
-  # )
-  
   return(rv)
 }
 
@@ -70,7 +64,9 @@ density %<>% flag_dense_tracts(20) %>%
   flag_dense_tracts(10) %>% 
   flag_dense_tracts(5) 
 
-# save(density, file = "map_clusters/LEHD_WAC_JT00_2015.Rdata")
+# density10 <- density
+# save(density10, file = "temp/prepped_LEHD_2010.Rdata")
+# save(density10, file = "map_clusters/LEHD_WAC_JT00_2010.Rdata")
 
 # recode_density <- function(df, num_cats) {
 #   

@@ -8,7 +8,9 @@
 
 library(here)
 source(here("R", "setup.R"))
-# source(here("R", "identify_clusters.R"))
+
+source(here("R", "prepare_LEHD.R"))
+rm(all_jobs, lehd_tract)
 
 load(here("map_clusters", "top100_coords.Rdata"))
 baltimore <- filter(top100_coords, cbsa=="12580")
@@ -90,7 +92,6 @@ bm %<>% flag_dense_blocks(20) %>%
   flag_dense_blocks(10) %>% 
   flag_dense_blocks(5) 
 
-
 # recode data for the map
 bm %<>% mutate(
   mapvar_20 = case_when(
@@ -133,7 +134,7 @@ bm.shp <- create_cbsa_shp(bm)
 #============================================================#
 
 # create labels
-labels <- sprintf("<strong>Block Group%s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
+labels <- sprintf("<strong>Block Group %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
                   bm.shp@data$blkgrp, bm.shp@data$job_tot, bm.shp@data$ALAND_SQMI,
                   bm.shp@data$density) %>%
   lapply(htmltools::HTML)
@@ -147,7 +148,7 @@ bm.map  <- leaflet(bm.shp) %>%
   setView(lng = baltimore$lon, lat = baltimore$lat, zoom = 9) %>%
   addTiles() %>%
   addPolygons(color = "#FFFFFF", weight = 0.5, fillColor = ~pal1(mapvar_20),
-              label = labels, fillOpacity = 0.60,
+              label = labels, fillOpacity = 0.65,
               labelOptions = labelOptions(list("font-weight" = "normal",
                                                padding = "3px 8px"),
                                           textsize = "15px", direction = "auto")) %>%
@@ -155,7 +156,23 @@ bm.map  <- leaflet(bm.shp) %>%
             position = "bottomright")
 bm.map
 
+#============================================================#
+# COMPUTE DESCRIPTIVE STATS
+#============================================================#
 
+# There are 1910 block groups, 95 in the top 5%
+summary(bm$most_dense_20)
+
+# compute number and share of jobs in clusters
+sum(bm$job_tot[bm$most_dense_5==TRUE]) / sum(bm$job_tot)
+sum(bm$job_tot[bm$most_dense_10==TRUE]) / sum(bm$job_tot)
+sum(bm$job_tot[bm$most_dense_20==TRUE]) / sum(bm$job_tot)
+
+# total job and job density distribution in Baltimore
+summary(bm$job_tot)
+summary(bm$density)
+quantile(bm$job_tot, c(0.8, 0.9, 0.95))
+quantile(bm$density, c(0.8, 0.9, 0.95))
 
 # save.image(file = "temp/baltimore_block_maps.Rdata")
 
