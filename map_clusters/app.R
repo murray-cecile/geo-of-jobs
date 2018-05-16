@@ -3,7 +3,7 @@
 #  Creates interactive map with dropdown 
 #
 # Cecile Murray
-# April 2018
+# Created April 2018; last updated May 2018
 ##==================================================================================##
 
 library(shiny)
@@ -18,7 +18,7 @@ library(tigris)
 library(foreign)
 library(leaflet)
 
-# use this if running locally ONLY; comment out for Shiny server
+# use this ONLY if running locally and with here(); comment out for Shiny server
 # setwd(paste0(here(), "/map_clusters"))
 
 # loading necessary data and functions
@@ -33,10 +33,18 @@ ui <- fluidPage(
    # header for cluster maps
    h3("Job clusters"),
    
-   # MAKE THIS ADJUST FOR EACH METRO
-   p("This dashboard explores job density (jobs per square mile) in the top 100 U.S. metro areas in 2010 and 2015. 
-     We identify job clusters as Census tracts with job density at the top part of the distribution 
-     in their metro."),
+   # explanation of job hub definition
+   p("This dashboard explores the geography of job clusters in the top 100 U.S.
+      metro areas in 2010 and 2015. We define job clusters as Census tracts that
+      meet two critera:"),
+   
+   tags$ol(
+     tags$li(tags$b("High job density:"), "they rank in the top part of the
+             distribution of job density (jobs per square mile) within their metro."),
+     tags$li(tags$b("High job count:"), "they contain a minimally significant
+             percentage of their metro's jobs.")
+     ),
+   
    br(),
    
    # select box for metro names
@@ -46,7 +54,12 @@ ui <- fluidPage(
                selected = "Baltimore-Columbia-Towson, MD"),
    br(),
    
-   # split layout for radio buttons and slider
+   # slider for years (currently set up for only 2010 and 2015)
+   sliderInput("year_slider", label = "Year",
+               min = 2010, max = 2015, value = 2015, step = 5, sep = ""),
+   br(),
+   
+   # split layout for radio buttons and sliders
    splitLayout(
    
    # radio buttons for density
@@ -56,9 +69,9 @@ ui <- fluidPage(
                                "Top 20 percent" = 3),
                 selected = 2),
    
-   # slider for years
-   sliderInput("slider", label = "Year",
-               min = 2010, max = 2015, value = 2015, step = 5, sep = ""),
+   # slider for minimum job threshold
+   sliderInput("job_min", label = "Minimum job threshold (% of metro jobs)", 
+               min = 0, max = 1, step = 0.25, value = 0),
    
    br()
    
@@ -77,7 +90,7 @@ ui <- fluidPage(
    tableOutput("overview"),
    
    # descriptive stats that show 2010 and 2015
-   tableOutput("descriptive_stats"),
+   # tableOutput("descriptive_stats"),
    
    # histogram
    plotOutput("distribution")
@@ -87,84 +100,105 @@ ui <- fluidPage(
 # Define server logic required to draw map
 server <- function(input, output) {
   
-  output$print_radio <- renderPrint({input$radio == "2"})
-  
-  # draw the map
-  output$cbsa <- renderLeaflet({
+  # reactive expression to get filtered shapefile
+  filteredShp <- reactive({
 
-    # get a CBSA name from user input
-    cbsa_name <- input$cbsa_name
-    cbsa_id <- unique(top100_xwalk$cbsa[top100_xwalk$cbsa_name==cbsa_name])
-
-    # get year from user input
-    if(input$slider==2010){
-      density <- density10
-    } else {
-      density <- density15
-    }
+    # get a CBSA ID from user input
+    cbsa_id <- unique(top100_xwalk$cbsa[top100_xwalk$cbsa_name==input$cbsa_name])
     
-    # get the selected density threshold from user input, rename variable
+    # get threshold from user input and recode
     thresh <- "default"
     thresh <- case_when(
       input$radio == 1 ~ "mapvar_20",
       input$radio == 2 ~ "mapvar_10",
       input$radio == 3 ~ "mapvar_5"
     )
-    density %<>% dplyr::rename(mapvar = !!thresh)
     
-    # select tracts in that CBSA
-    cbsa <- select_cbsa_tracts(density,
-                               cbsa_id,
-                               xwalk = top100_xwalk)
+    # filter by year and density threshold
+    filteredData <- filter(density,
+                           year==input$year_slider,
+                           num_quant==thresh)
+    
+    # recode according to job threshold
+    filteredData %<>% recode_job_min(cbsa_id = cbsa_id,
+                                     yr = input$year_slider,
+                                     thresh = thresh,
+                                     min_pp = input$job_min,
+                                     met_jobs = met_jobs)
+    
+    # select tracts in that CBSA and create cbsa-specific tract shapefile with data
+    create_cbsa_shp(select_cbsa_tracts(filteredData,
+                                                  cbsa_id,
+                                                  xwalk = top100_xwalk))
 
-    # create cbsa-specific tract shapefile with data
-    cbsa.shp <-create_cbsa_shp(cbsa)
+  })
+  
+  # define function to assign colors to polygons
+  colorPal <- reactive({
+    cbsa.shp <- filteredShp()
     
-    # gets coords for initial map location
-    coords <- filter(top100_coords, cbsa==cbsa_id)
+    if(input$job_min > 0 ){
+      colorFactor(c("#FF5E1A", "#FFCF1A","#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
+                  as.factor(cbsa.shp@data$mapvar))
+    } else {
+      colorFactor(c("#FF5E1A", "#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
+                  as.factor(cbsa.shp@data$mapvar))
+    }
+  })
+  
+  # sets coordinates for start point
+  Coords <- reactive({
+    coords <- filter(top100_coords, cbsa_name==input$cbsa_name)
+    })
+  
+  # draw the map (this part remains static unless the CBSA changes)
+  output$cbsa <- renderLeaflet({
 
-    # set labels
-    labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
-                      cbsa.shp@data$tract, cbsa.shp@data$job_tot, cbsa.shp@data$ALAND_SQMI,
-                      cbsa.shp@data$density) %>%
-      lapply(htmltools::HTML)
-    
-    
-    # create color scheme
-    # pal0 <- colorBin(colorRamp(c("#E0ECFB", "#00649F"), interpolate = "spline"), 
-    #                  cbsa$most_dense_10, bins = 2)
-    pal0 <- colorFactor(c("#FFCF1A", "#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
-                        as.factor(cbsa$mapvar))
+    coords <- Coords()
     
     # make the leaflet map
-    leaflet(cbsa.shp) %>%
+    leaflet() %>%
       setView(lng = coords$lon, lat = coords$lat, zoom = 9) %>%
-      addTiles() %>%
+      addTiles() 
+  })
+
+  # Observer that updates map with new selected data
+  observe({
+    
+    pal0 <- colorPal()
+    
+    # set labels
+    labeldata <- filteredShp()@data
+    labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
+                      labeldata$tract, labeldata$job_tot, labeldata$ALAND_SQMI,
+                      labeldata$density) %>%
+      lapply(htmltools::HTML)
+    
+    leafletProxy("cbsa", data = filteredShp()) %>%
+      clearShapes() %>%
       addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
                   opacity = 1, fillOpacity = 0.75,
                   fillColor = ~pal0(mapvar),
                   highlight = highlightOptions(
-                    weight = 5,
+                    weight = 3,
                     color = "#666",
                     fillOpacity = 0.7,
                     bringToFront = TRUE),
                   label = labels,
                   labelOptions = labelOptions(list("font-weight" = "normal",
                                                    padding = "3px 8px"),
-                                              textsize = "15px", direction = "auto")) %>%
-      addLegend(pal = pal0, values = ~mapvar, opacity = 0.75, title = NULL,
-                position = "bottomright")
-
-  })
-
-  output$test_text <- renderText ({
-    paste("Source: LEHD LODES")
-    # # get a CBSA name from user input
-    # cbsa_name <- input$cbsa_name
-    # coords <- filter(top100_coords, cbsa==cbsa_id)
-    # paste("These are supposed to be the coordinates:", coords$lon, coords$lat)
+                                              textsize = "15px", direction = "auto"))
   })
   
+  # observer to update legend with new data selection
+  observe({
+    proxy <- leafletProxy("cbsa", data = filteredShp())
+    
+    proxy %>% clearControls() %>%
+      addLegend(pal = colorPal(), values = ~mapvar, opacity = 0.75,
+                title = NULL, position = "bottomright")
+  })
+
   # creates overview table
   output$overview <- renderTable ({
     

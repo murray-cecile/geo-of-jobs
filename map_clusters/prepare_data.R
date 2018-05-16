@@ -1,51 +1,16 @@
 ##==================================================================================##
 # GEO OF JOBS: PREPARE DATA FOR SHINY APP
-#  Backend data and functions
+#  Loads in backend data and defines key functions
 #
 # Cecile Murray
-# April 2018
+# April 2018; reconfigured May 2018
 ##==================================================================================##
 
-# bringing in data
-load("LEHD_WAC_JT00_2010.Rdata")
-load("LEHD_WAC_JT00_2015.Rdata")
-load("cbsa_xwalk.Rdata")
-load("top100_coords.Rdata")
-
-# function to recode data for the map
-recode_map_vars <- function(df){
-  rv <- mutate(df,
-    mapvar_20 = case_when(
-      dense_cat_20 < 17 | is.na(dense_cat_20) ~ "low density",
-      dense_cat_20 == 17 ~ "p80",
-      dense_cat_20 == 18 ~ "p85",
-      dense_cat_20 == 19 ~ "p90",
-      dense_cat_20 == 20 ~ "cluster"
-    ), 
-    mapvar_10 = case_when(
-      dense_cat_20 < 17 | is.na(dense_cat_20) ~ "low density",
-      dense_cat_20 == 17 ~ "p80",
-      dense_cat_20 == 18 ~ "p85",
-      dense_cat_10 == 10 ~ "cluster"
-    ), 
-    mapvar_5 = ifelse(dense_cat_20 >= 17, "cluster", "low_density")
-  )
-  return(rv)
-}
-
-# recode variables and rename 2015 density
-density15 <- recode_map_vars(density)
-density10 %<>% recode_map_vars()
-
-rm(density)
+load("data_for_shiny.Rdata")
 
 #============================================================#
-# CREATE CBSA-COUNTY XWALK 
+# PREP A SHAPEFILE
 #============================================================#
-
-# produce more workable crosswalk
-top100_xwalk <- cbsa_xwalk %>% filter(top100==1) %>% 
-  select(cbsa, cbsa_name, stcofips) 
 
 # function to filter down to tracts only in a given cbsa
 select_cbsa_tracts <- function(df, cbsa_id, xwalk = top100_xwalk) {
@@ -53,16 +18,6 @@ select_cbsa_tracts <- function(df, cbsa_id, xwalk = top100_xwalk) {
   rv <- df %>% dplyr::filter(substr(tract, 1, 5) %in% ctys$stcofips)
   return(rv)
 }
-
-#============================================================#
-# PREP A SHAPEFILE
-#============================================================#
-
-# make tract shapefile
-tracts.shp <- readOGR("tracts.shp")
-
-density15 %<>% arrange(tract, job_tot, ALAND_SQMI, density)
-density10 %<>% arrange(tract, job_tot, ALAND_SQMI, density)
 
 # function to produce the trimmed shapefile
 create_cbsa_shp <- function(cbsa_tracts, tr.shp = tracts.shp){
@@ -74,77 +29,41 @@ create_cbsa_shp <- function(cbsa_tracts, tr.shp = tracts.shp){
 }
 
 #============================================================#
-# COMPUTE OVERVIEW DATA
+# IMPLEMENT MINIMUM JOB SHARE THRESHOLD
 #============================================================#
 
-# summarize to 100 metros
-summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk) {
+# identify relevant job minimum and return that value
+id_job_min <- function(min_pp, cbsa_id, yr, met_jobs = met_jobs){
+ 
+  min <- case_when(
+    min_pp == 0 ~ "zero_pp",
+    min_pp == 0.25 ~ "oquart_pp",
+    min_pp == 0.5 ~ "half_pp",
+    min_pp == 0.75 ~ "tquart_pp",
+    min_pp == 1 ~ "one_pp",
+    TRUE ~ "zero_pp"
+  )
   
-  # prepare cbsa list, select vars of interest from density df
-  cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
-    filter(top100==1)
-  rv <- df %>% select(-tract, -cbsa_name, -contains("dense_cat"), -contains("mapvar")) %>%
-    mutate(tr_ct = 1,
-           cluster_ct_20 = ifelse(most_dense_20, 1, 0),
-           cluster_ct_10 = ifelse(most_dense_10, 1, 0),
-           cluster_ct_5 = ifelse(most_dense_5, 1, 0))
+  mins <- met_jobs %>% filter(cbsa == cbsa_id, year == yr, pp_min == min)
+  return(mins$job_min)
+}
 
-  # summarize given the number of functions provided
-  if(length(f)==1){
-    rv %<>% group_by(cbsa) %>% summarize_all(funs(!!f))
-  } else {
-    rv %<>% group_by(cbsa) %>% summarize_all(funs_(f))
-  }
-
-  # join with cbsa names, select relevant ones
-  rv %<>% left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>%
-    select(cbsa, cbsa_name, starts_with(var), contains("most_dense"), density_min,
-           tr_ct_sum, contains("cluster"), -ends_with("0_min"), -most_dense_5_min)
-
+# function to recode mapped variable to filter out low job count tracts
+recode_job_min <- function(df, cbsa_id, yr, thresh, min_pp, met_jobs = met_jobs){
+  
+  job_min <- id_job_min(min_pp = min_pp, cbsa_id = cbsa_id,
+                        yr = yr, met_jobs = met_jobs)
+  
+  # now recode the mapvar variable to reflect minimim job threshold
+  rv <- df %>% mutate(mapvar = case_when(
+    (mapvar == "cluster") & (job_tot > job_min) ~ "cluster",
+    (mapvar == "cluster") & (job_tot <= job_min) ~ "high density",
+    mapvar != "cluster" ~ mapvar
+  ))
+  
   return(rv)
 }
 
-met_summary15 <- summarize_by_metro(density15, var = "job_tot", f = c("sum", "min")) %>%
-  filter(cbsa %in% top100_xwalk$cbsa)
-met_summary10 <- summarize_by_metro(density10, var = "job_tot", f = c("sum", "min")) %>%
-  filter(cbsa %in% top100_xwalk$cbsa)
-
-met_summary <- full_join(met_summary10, met_summary15, by = c("cbsa", "cbsa_name"),
-                         suffix = c("_2010", "_2015")) %>%
-  gather("temp", "n", 3:24, -cbsa, -cbsa_name) %>%
-  mutate(year = regmatches(temp, regexpr("20\\d\\d", temp)),
-         temp = gsub("_20\\d\\d", "", temp)) %>% spread(temp, n) %>%
-  dplyr::rename(CBSA = cbsa_name, 
-                `Number of tracts` = tr_ct_sum,
-                `Total jobs` = job_tot_sum) %>%
-  gather("name", "n", -cbsa, -CBSA, -year)
-
-#============================================================#
-# COMPUTE YEAR BY YEAR DESCRIPTIVE STATS
-#============================================================#
-
-# compute density cutoffs
-compute_density_thresholds <- function(df, cbsa = cbsa_xwalk) {
-  
-  # prepare cbsa list, select vars of interest from density df
-  cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
-    filter(top100==1)
-  rv <- df %>% select(cbsa, density) %>% 
-    group_by(cbsa) %>% mutate(p80 = quantile(density, 0.8, na.rm=TRUE),
-                              p85 = quantile(density, 0.85, na.rm=TRUE),
-                              p90 = quantile(density, 0.9, na.rm=TRUE),
-                              p95 = quantile(density, 0.95, na.rm=TRUE)) %>%
-    select(-density) %>% summarize_all(first) %>%
-    left_join(cbsa, by="cbsa") %>% filter(top100==1) %>%
-    select(cbsa, cbsa_name, everything()) %>% select(-top100) %>%
-    gather("percentile", "n" ,-cbsa, -cbsa_name)
-  return(rv)
-}
-
-thresholds <- full_join(compute_density_thresholds(density10),
-                        compute_density_thresholds(density15),
-                        by = c("cbsa", "cbsa_name", "percentile"),
-                        suffix = c("_2010", "_2015"))
 
 
 

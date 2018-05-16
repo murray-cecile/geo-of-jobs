@@ -5,8 +5,8 @@ account: murray-cecile
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 328316
-bundleId: 1339179
+bundleId: 1377339
 url: https://murray-cecile.shinyapps.io/map_clusters/
-when: 1524683494.33901
+when: 1526495845.07698
 asMultiple: FALSE
 asStatic: FALSE
