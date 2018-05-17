@@ -73,7 +73,8 @@ density <- bind_rows(convert_to_long(density15, 2015),
 # CALCULATE JOB MINIMUMS
 #============================================================#
 
-met_jobs <- density %>% select(cbsa, cbsa_name, year, job_tot) %>% 
+met_jobs <- density %>% filter(num_quant == "mapvar_20") %>%
+  select(cbsa, cbsa_name, year, job_tot) %>%
   group_by(cbsa, cbsa_name, year) %>% summarize(job_tot = sum(job_tot, na.rm=TRUE)) %>% 
   mutate(zero_pp = job_tot * 0,
          oquart_pp = job_tot * 0.0025,
@@ -81,52 +82,6 @@ met_jobs <- density %>% select(cbsa, cbsa_name, year, job_tot) %>%
          tquart_pp = job_tot * 0.0075,
          one_pp = job_tot * 0.01) %>%
   gather("pp_min", "job_min", contains("pp"), -cbsa, -cbsa_name, -year)
-
-#============================================================#
-# COMPUTE OVERVIEW DATA
-#============================================================#
-
-# summarize to 100 metros
-summarize_by_metro <- function(df, var = "job_tot", f = "sum", cbsa = cbsa_xwalk) {
-  
-  # prepare cbsa list, select vars of interest from density df
-  cbsa <- cbsa %>% select(cbsa, cbsa_name, top100) %>% distinct() %>%
-    filter(top100==1)
-  rv <- df %>% select(-tract, -cbsa_name, -contains("dense_cat"), -contains("mapvar")) %>%
-    mutate(tr_ct = 1,
-           cluster_ct_20 = ifelse(most_dense_20, 1, 0),
-           cluster_ct_10 = ifelse(most_dense_10, 1, 0),
-           cluster_ct_5 = ifelse(most_dense_5, 1, 0))
-  
-  # summarize given the number of functions provided
-  if(length(f)==1){
-    rv %<>% group_by(cbsa) %>% summarize_all(funs(!!f))
-  } else {
-    rv %<>% group_by(cbsa) %>% summarize_all(funs_(f))
-  }
-  
-  # join with cbsa names, select relevant ones
-  rv %<>% left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>%
-    select(cbsa, cbsa_name, starts_with(var), contains("most_dense"), density_min,
-           tr_ct_sum, contains("cluster"), -ends_with("0_min"), -most_dense_5_min)
-  
-  return(rv)
-}
-
-met_summary15 <- summarize_by_metro(density15, var = "job_tot", f = c("sum", "min")) %>%
-  filter(cbsa %in% top100_xwalk$cbsa)
-met_summary10 <- summarize_by_metro(density10, var = "job_tot", f = c("sum", "min")) %>%
-  filter(cbsa %in% top100_xwalk$cbsa)
-
-met_summary <- full_join(met_summary10, met_summary15, by = c("cbsa", "cbsa_name"),
-                         suffix = c("_2010", "_2015")) %>%
-  gather("temp", "n", 3:24, -cbsa, -cbsa_name) %>%
-  mutate(year = regmatches(temp, regexpr("20\\d\\d", temp)),
-         temp = gsub("_20\\d\\d", "", temp)) %>% spread(temp, n) %>%
-  dplyr::rename(CBSA = cbsa_name, 
-                `Number of tracts` = tr_ct_sum,
-                `Total jobs` = job_tot_sum) %>%
-  gather("name", "n", -cbsa, -CBSA, -year)
 
 #============================================================#
 # COMPUTE YEAR BY YEAR DESCRIPTIVE STATS
@@ -154,5 +109,7 @@ thresholds <- full_join(compute_density_thresholds(density10),
                         compute_density_thresholds(density15),
                         by = c("cbsa", "cbsa_name", "percentile"),
                         suffix = c("_2010", "_2015"))
+
+source("calc_descriptive_stats.R")
 
 save.image("data_for_shiny.Rdata")

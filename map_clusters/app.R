@@ -19,6 +19,7 @@ library(foreign)
 library(leaflet)
 
 # use this ONLY if running locally and with here(); comment out for Shiny server
+# library(here)
 # setwd(paste0(here(), "/map_clusters"))
 
 # loading necessary data and functions
@@ -85,6 +86,8 @@ ui <- fluidPage(
    
    # Descriptive stats
    h4("Descriptive stats for this metro area:"),
+   textOutput("descriptive_text"),
+   br(),
    
    # overview stats that are the same from year to year
    tableOutput("overview"),
@@ -99,6 +102,9 @@ ui <- fluidPage(
 
 # Define server logic required to draw map
 server <- function(input, output) {
+  
+  # cbsa name
+  output$CBSA <- renderText({unlist(str_split(input$cbsa_name, "-"))[[1]]})
   
   # reactive expression to get filtered shapefile
   filteredShp <- reactive({
@@ -199,18 +205,36 @@ server <- function(input, output) {
                 title = NULL, position = "bottomright")
   })
 
+  # creates text for descriptive stats section
+  output$descriptive_text <- renderText({
+    met <- filter(met_summary, year==input$year_slider, cbsa_name==input$cbsa_name)
+    
+    paste0(input$cbsa_name,
+           " has ",
+           format(met$tr_ct[1], big.mark = ","),
+           " Census tracts, which contained ",
+           format(met$jobs[1], big.mark = ","), 
+           " jobs in ",
+           format(input$year_slider),
+           ".")
+  })
+  
   # creates overview table
   output$overview <- renderTable ({
     
-    filter(select(met_summary15, cbsa_name, tr_ct_sum, contains("most_dense")),
-                  cbsa_name==input$cbsa_name) %>%
+    filter(select(ungroup(met_summary), cbsa_name, year, num_quant, min, 
+                  cluster_jobs, cluster_ct, job_share),
+           year==input$year_slider,
+           cbsa_name==input$cbsa_name) %>%
+      arrange(min, num_quant) %>% 
       dplyr::rename(CBSA = cbsa_name, 
-                    `Number of tracts` = tr_ct_sum,                
-                    `Tracts in top 20%` = most_dense_5_sum,
-                    `Tracts in top 10%` = most_dense_10_sum,
-                    `Tracts in top 5%` = most_dense_20_sum) %>%
-      gather()
-  }, colnames = FALSE)
+                    `Density threshold` = num_quant,
+                    `Min % jobs` = min,
+                    `Jobs in clusters` = cluster_jobs,
+                    `Number of clusters` = cluster_ct,
+                    `% jobs in clusters` = job_share) %>%
+      select(-CBSA, -year)
+  }, colnames = TRUE)
   
   # creates table of desriptive stats for 2010 and 2015
   output$descriptive_stats <- renderTable ({
