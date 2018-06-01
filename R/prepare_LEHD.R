@@ -51,4 +51,4 @@ all_jobs <- lehd_tract %>% mutate(stfips = substr(tract, 1, 2),
                                   stcofips = substr(tract, 1, 5)) %>%
   select(tract, stfips, stcofips, job_tot, ALAND_SQMI, jobs_sqmi)
 
-# save.image(file = here("temp", "prepped_LEHD_2010.Rdata"))
+# save.image(file = here("temp", "prepped_LEHD_2015.Rdata"))
