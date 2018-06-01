@@ -31,24 +31,35 @@ tract_area %<>% mutate(tract = padz(as.character(GEOID)),
 # BRING IN LEHD DATA
 #============================================================#
 
+# 2015
 setwd(paste0(lehd_dir, "/wac_JT00_2015"))
-raw_lehd <- read.dta13("2015_ALL_wac_JT00.dta")
+raw_lehd_15 <- read.dta13("2015_ALL_wac_JT00.dta")
+
+# 2010
+setwd(paste0(lehd_dir, "/wac_JT00_2010"))
+raw_lehd_10 <- read.dta13("2010_ALL_wac_JT00.dta")
 setwd(here())
 
+#============================================================#
+# COLLAPSE LEHD
+#============================================================#
+
 # collapse to tract, merge with land area data
-lehd_tract <- raw_lehd %>% mutate(tract = substr(fips, 1, 11)) %>%
-  select(-fips) %>%
-  group_by(tract) %>% summarize_all(sum, na.rm=TRUE) %>%
-  recode_dumb_tracts() %>%
-  left_join(select(tract_area, tract, ALAND_SQMI), by="tract") %>%
-  mutate(jobs_sqmi = job_tot / ALAND_SQMI,
-         hwage_share = wage_high / job_tot,
-         hwage_density = wage_high / ALAND_SQMI,
-         ba_share = baplus / job_tot,
-         ba_density = baplus / ALAND_SQMI)
+collapse_to_tract <- function(lehd_df, area = tract_area){  
+  
+  area %<>% select(tract, ALAND_SQMI)
+  
+  rv <- lehd_df %>% mutate(tract = substr(fips, 1, 11)) %>%
+    select(-fips) %>%
+    group_by(tract) %>% summarize_all(sum, na.rm=TRUE) %>%
+    recode_dumb_tracts() %>%
+    left_join(area, by="tract") 
+  
+  return(rv)
+}
 
-all_jobs <- lehd_tract %>% mutate(stfips = substr(tract, 1, 2),
-                                  stcofips = substr(tract, 1, 5)) %>%
-  select(tract, stfips, stcofips, job_tot, ALAND_SQMI, jobs_sqmi)
+lehd_tract_10 <- collapse_to_tract(raw_lehd_10)
+lehd_tract_15 <- collapse_to_tract(raw_lehd_15)
 
-# save.image(file = here("temp", "prepped_LEHD_2015.Rdata"))
+# rm(raw_lehd_10, raw_lehd_15)
+# save.image(file = here("temp", "prepped_LEHD_2010_2015.Rdata"))

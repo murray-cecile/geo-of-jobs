@@ -3,48 +3,44 @@
 #  Script to identify job clusters in the largest 100 metros
 #
 # Cecile Murray
-# April 2018; Updated May 2018
+# April 2018; Updated June 2018
 ##==================================================================================##
 
-# bringing in libraries, filepaths, other global vars
-library(here)
-source(here("R", "setup.R"))
-
-load(here("temp", "prepped_LEHD_2015.Rdata"))
-
 # Outline:
-# 1. Collapse to tract and compute job density
+# 1. Bind years together, compute job density
 # 2. Flag tracts in top 20th, 10th, and 5th percentiles of density.
 # 3. Recode to indicate tract categorization, convert to long.
 # 4. Compute a variety of job minimum thresholds for each metro
 
 
+# bringing in libraries, filepaths, other global vars
+library(here)
+source(here("R", "setup.R"))
+
+load(here("temp", "prepped_LEHD_2010_2015.Rdata"))
+
+
 #============================================================#
-# PREPARE LEHD
+# COMBINE YEARS; COMPUTE DENSITY
 #============================================================#
 
-# function that collapses block-level LEHD into tracts
-collapse_lehd <- function(lehd_df) {
-  rv <- lehd_df %>% mutate(tract = substr(fips, 1, 11)) %>%
-    select(-fips) %>% group_by(tract) %>% summarize_all(sum, na.rm=TRUE)
-  return(rv)
-}
+# combine years of data
+lehd <- bind_rows(mutate(lehd_tract_10, year = 2010),
+                  mutate(lehd_tract_15, year = 2015))
 
-lehd <- collapse_lehd(raw_lehd)
-
-# take collapsed LEHD, add tract area, compute density w/rt given variable, add metro
-compute_tract_density <- function(df, area_df, var, cbsa = cbsa_xwalk) {
+# take collapsed LEHD, compute density w/rt given variable, add metro
+compute_tract_density <- function(df, var, cbsa = cbsa_xwalk) {
   var <- enquo(var)
-  rv <- df %>% select(tract, !!var) %>% 
-    left_join(select(area_df, tract, ALAND_SQMI, stcofips), by="tract") %>%
-    mutate(density  = UQ(var) / ALAND_SQMI) %>%
+  rv <- df %>% select(tract, year, !!var, ALAND_SQMI) %>% 
+    mutate(density  = UQ(var) / ALAND_SQMI,
+           stcofips = substr(tract, 1, 5)) %>%
     left_join(select(cbsa, cbsa, cbsa_name, stcofips), by="stcofips") %>%
     select(-stcofips)
   
   return(rv)
 }
 
-density <- compute_tract_density(lehd, tract_area, var = job_tot, cbsa = cbsa_xwalk)
+density <- compute_tract_density(lehd, var = job_tot, cbsa = cbsa_xwalk)
 
 #============================================================#
 # CREATE DENSITY FLAGS
@@ -56,7 +52,7 @@ flag_dense_tracts <- function(df, num_cats) {
   cat_name <- paste0("dense_cat_", num_cats)
   dense_name <- paste0("most_dense_", num_cats)
 
-  rv <- df %>% group_by(cbsa) %>%
+  rv <- df %>% group_by(cbsa, year) %>%
     mutate(UQ(cat_name) := ntile(density, num_cats)) %>%
     ungroup()
   
@@ -70,10 +66,6 @@ flag_dense_tracts <- function(df, num_cats) {
 density %<>% flag_dense_tracts(20) %>% 
   flag_dense_tracts(10) %>% 
   flag_dense_tracts(5)
-
-# density10 <- density
-# save(density10, file = "temp/prepped_LEHD_2010.Rdata")
-# save(density10, file = "map_clusters/LEHD_WAC_JT00_2010.Rdata")
 
 #============================================================#
 # CATEGORIZE TRACTS BY DENSITY
@@ -107,19 +99,24 @@ density %<>% recode_map_vars() %>%
   select(-contains("dense_cat"), -contains("most_dense"))
 
 #============================================================#
-# IMPLEMENT MINIMUM JOB SHARE THRESHOLD
+# CALCULATE MINIMUM JOB SHARES BY METRO
 #============================================================#
 
-# first, calculate possible minimum shares for each metro
+# calculate minimum jobs for each metro in each year at each minimum percentage
 met_jobs <- density %>% filter(num_quant == "mapvar_20") %>%
-  select(cbsa, cbsa_name, job_tot) %>%
-  group_by(cbsa, cbsa_name) %>% summarize(job_tot = sum(job_tot, na.rm=TRUE)) %>% 
+  select(cbsa, cbsa_name, year, job_tot) %>%
+  group_by(cbsa, cbsa_name, year) %>% summarize(job_tot = sum(job_tot, na.rm=TRUE)) %>% 
   mutate(zero_pp = job_tot * 0,
          oquart_pp = job_tot * 0.0025,
          half_pp = job_tot * 0.005,
          tquart_pp = job_tot * 0.0075,
          one_pp = job_tot * 0.01) %>%
-  gather("pp_min", "job_min", contains("pp"), -cbsa, -cbsa_name)
+  gather("pp_min", "job_min", contains("pp"), -cbsa, -cbsa_name, -year) %>%
+  ungroup()
+
+#============================================================#
+# IMPLEMENT MINIMUM JOB SHARE THRESHOLD
+#============================================================#
 
 # identify relevant job minimum and return that value
 id_job_min <- function(min_pp, met_jobs = met_jobs){
@@ -133,28 +130,34 @@ id_job_min <- function(min_pp, met_jobs = met_jobs){
     TRUE ~ "zero_pp"
   )
   
-  mins <- met_jobs %>% filter(pp_min == min)
+  mins <- met_jobs %>% filter(pp_min == min) %>% select(cbsa, year, job_min)
   return(mins)
 }
 
 # function to recode mapped variable to filter out low job count tracts
-recode_job_min <- function(df, thresh, min_pp, met_jobs = met_jobs){
+recode_job_min <- function(df, min_pp, met_jobs = met_jobs){
   
   mins <- id_job_min(min_pp = min_pp, met_jobs = met_jobs)
   
   # now recode the mapvar variable to reflect minimim job threshold
-  rv <- df %>% left_join(mins, by = "cbsa")
-    mutate(mapvar = case_when(
-    (mapvar == "cluster") & (job_tot > min) ~ "cluster",
-    (mapvar == "cluster") & (job_tot <= min) ~ "high density",
-    mapvar != "cluster" ~ mapvar
-  ))
+  rv <- df %>% left_join(mins, by = c("cbsa", "year")) %>% 
+  mutate(pp_min = min_pp, 
+         mapvar = case_when(
+           (mapvar == "cluster") & (job_tot > job_min) ~ "cluster",
+           (mapvar == "cluster") & (job_tot <= job_min) ~ "high density",
+           mapvar != "cluster" ~ mapvar
+         ))
   
   return(rv)
 }
 
 
+# apply job minimum threshold for 0.25, 0.5, and 0.75; bind together
+density <- lapply(seq(0.25, 0.75, 0.25), 
+                    function(x) {recode_job_min(density, x, met_jobs = met_jobs)}) %>%
+  bind_rows()
 
+# save.image(here("temp", "cluster_options_2010_2015.Rdata"))
 
 
 
