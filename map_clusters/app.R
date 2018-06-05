@@ -3,7 +3,7 @@
 #  Creates interactive map with dropdown 
 #
 # Cecile Murray
-# Created April 2018; last updated May 2018
+# Created April 2018; last updated June 2018
 ##==================================================================================##
 
 library(shiny)
@@ -17,8 +17,10 @@ library(janitor)
 library(tigris)
 library(foreign)
 library(leaflet)
+library(ggridges)
+library(viridis)
 
-# use this ONLY if running locally and with here(); comment out for Shiny server
+# # use this ONLY if running locally and with here(); comment out for Shiny server
 # library(here)
 # setwd(paste0(here(), "/map_clusters"))
 
@@ -35,9 +37,9 @@ ui <- fluidPage(
    h3("Job clusters"),
    
    # explanation of job hub definition
-   p("This dashboard explores the geography of job clusters in the top 100 U.S.
-      metro areas in 2010 and 2015. We define job clusters as Census tracts that
-      meet two critera:"),
+   p("This dashboard explores the geography of job clusters in 98 of the top 100 U.S.
+      metro areas in 2010 and 2015 (we exclude Boston and Worcester due to data
+      limitations). We define job clusters as Census tracts that meet two critera:"),
    
    tags$ol(
      tags$li(tags$b("High job density:"), "they rank in the top part of the
@@ -51,7 +53,7 @@ ui <- fluidPage(
    # select box for metro names
    selectInput("cbsa_name",
                label = "Choose a metro area",
-               choices = sort(unique(cbsa_xwalk$cbsa_name[cbsa_xwalk$top100==1])),
+               choices = sort(unique(top100_coords$cbsa_name)),
                selected = "Baltimore-Columbia-Towson, MD"),
    br(),
    
@@ -77,6 +79,14 @@ ui <- fluidPage(
    br()
    
    ),
+   
+   
+   p("Tracts identified as clusters are shown on the map in orange; tracts that meet
+     the density threshold (criteria #1) but do not contain the specified minimum
+     job percentage (criteria #2) are shown in yellow. All other tracts are colored
+     according to where they fall in the distribution of job density in the metro area."),
+   br(),
+   
     # leaflet map of the job clusters
    leafletOutput("cbsa"),
    
@@ -143,12 +153,14 @@ server <- function(input, output) {
   colorPal <- reactive({
     cbsa.shp <- filteredShp()
     
-    if(input$job_min > 0 ){
-      colorFactor(c("#FF5E1A", "#FFCF1A","#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
-                  as.factor(cbsa.shp@data$mapvar))
+    if(input$job_min > 0){
+      colorFactor(c("#FF5E1A", "#FFCF1A","#E0ECFB", "#00649F", "#3E83C1", "#A4C7F2"),
+                  levels = c("cluster", "high density", "low density", "p90",
+                             "p85", "p80"))
     } else {
       colorFactor(c("#FF5E1A", "#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
-                  as.factor(cbsa.shp@data$mapvar))
+                  levels = c("cluster", "low density", "p90",
+                             "p85", "p80"))
     }
   })
   
@@ -247,17 +259,48 @@ server <- function(input, output) {
   
   # creates density plot
   output$distribution <- renderPlot({
-    ggplot() +
-      geom_histogram(data =  filter(density15, cbsa_name==input$cbsa_name),
-                     aes(x = density), binwidth=25, color = "#00649f") +
-      geom_histogram(data = filter(density10, cbsa_name==input$cbsa_name),
-                     aes(x = density), binwidth=25, color = "#8AC6FF") +
-    labs(x = "Jobs per square mile", y = "") +
-      xlim(0, 30000)
+    
+    # get threshold from user input and recode
+    thresh <- "default"
+    thresh <- case_when(
+      input$radio == 1 ~ "mapvar_20",
+      input$radio == 2 ~ "mapvar_10",
+      input$radio == 3 ~ "mapvar_5"
+    )
+    
+    # filter by year and density threshold
+    plot_data <- filter(density, cbsa_name == input$cbsa_name,
+                        year == input$year_slider,
+                        num_quant == thresh)
+    
+    # filter density thresholds to cbsa, identify p80 threshold
+    cbsa_thresh <- filter(thresholds, cbsa_name == input$cbsa_name)
+    p80 <- cbsa_thresh[cbsa_thresh$percentile == "p80",
+                       paste0("n_", input$year_slider)]
+    p90 <- cbsa_thresh[cbsa_thresh$percentile == "p90",
+                          paste0("n_", input$year_slider)]
+    p95 <- cbsa_thresh[cbsa_thresh$percentile == "p95",
+                       paste0("n_", input$year_slider)]
+    
+    ggplot(plot_data) +
+      geom_density(aes(x = density), fill = "#23A7E0", color = "gray90") +
+      geom_vline(aes(xintercept = p80), show.legend = TRUE) +
+      geom_text(aes(label = "p80", x = p80 + 250, y = .0006)) +
+      geom_vline(aes(xintercept = p90), show.legend = TRUE) +
+      geom_text(aes(label = "p90", x = p90 + 250, y = .0006)) +
+      geom_vline(aes(xintercept = p95), show.legend = TRUE) +
+      geom_text(aes(label = "p95", x = p95 + 250, y = .0006)) +
+      labs(title = paste0("Distribution of job density in ", input$cbsa_name, 
+                          ", ", input$year_slider),
+           x = "Jobs per square mile", y = "") +
+      xlim(0, 15000) +
+      theme_minimal()
   })
   
 }
 
 # Run the application 
 shinyApp(ui = ui, server = server)
+
+
 

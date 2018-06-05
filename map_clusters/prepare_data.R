@@ -9,6 +9,17 @@
 load("data_for_shiny.Rdata")
 
 #============================================================#
+# FILTER OUT MASSACHUSETTS AND WYOMING
+#============================================================#
+
+# no MA, WY data
+density %<>% filter(!substr(tract, 1, 2) %in% c("25" ,"56"))
+
+# cut Boston and Worcester out of the metor list
+top100_coords %<>% filter(!cbsa %in% c("14460", "49340"))
+top100_xwalk %<>% filter(!cbsa %in% c("14460", "49340"))
+
+#============================================================#
 # PREP A SHAPEFILE
 #============================================================#
 
