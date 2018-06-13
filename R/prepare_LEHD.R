@@ -38,6 +38,8 @@ raw_lehd_15 <- read.dta13("2015_ALL_wac_JT00.dta")
 # 2010
 setwd(paste0(lehd_dir, "/wac_JT00_2010"))
 raw_lehd_10 <- read.dta13("2010_ALL_wac_JT00.dta")
+
+# change working directory back to main directory
 setwd(here())
 
 #============================================================#

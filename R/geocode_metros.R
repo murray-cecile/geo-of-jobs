@@ -15,8 +15,8 @@ top100_xwalk <- cbsa_xwalk %>% filter(top100==1) %>%
 
 top100 <- unique(top100_xwalk$cbsa_name)
 
-top100_coords <- top100_xwalk %>% select(cbsa, cbsa_name) %>% distinct() %>%
-  mutate(lat = 0, lon = 0)
+# top100_coords <- top100_xwalk %>% select(cbsa, cbsa_name) %>% distinct() %>%
+#   mutate(lat = 0, lon = 0)
 
 for(i in seq_along(top100)[1:100]) {
   
@@ -32,5 +32,14 @@ for(i in seq_along(top100)[1:100]) {
   }
   
 }
+
+
+# fix Pittsburgh, Winston-Salem, and Sam Antonio manually
+top100_coords$lat[top100_coords$cbsa == "38300"] <- 40.4313473
+top100_coords$lon[top100_coords$cbsa == "38300"] <- -80.05054
+top100_coords$lat[top100_coords$cbsa == "41700"] <- 29.4813572
+top100_coords$lon[top100_coords$cbsa == "41700"] <- -98.6544876
+top100_coords$lat[top100_coords$cbsa == "49180"] <- 36.1045516
+top100_coords$lon[top100_coords$cbsa == "49180"] <- -80.3134975
 
 # save(top100_coords, file = "map_clusters/top100_coords.Rdata")

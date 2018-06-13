@@ -20,14 +20,15 @@ library(leaflet)
 library(ggridges)
 library(viridis)
 
-# # use this ONLY if running locally and with here(); comment out for Shiny server
+# # use this ONLY if running locally and with here()
+# # comment out before uploading to Shiny server!
 # library(here)
 # setwd(paste0(here(), "/map_clusters"))
 
 # loading necessary data and functions
 source("prepare_data.R")
 
-# Define UI for map application 
+# Define UI: this part controls the app layout and explanatory text
 ui <- fluidPage(
    
    # Application title
@@ -41,6 +42,7 @@ ui <- fluidPage(
       metro areas in 2010 and 2015 (we exclude Boston and Worcester due to data
       limitations). We define job clusters as Census tracts that meet two critera:"),
    
+   # definitional criteria
    tags$ol(
      tags$li(tags$b("High job density:"), "they rank in the top part of the
              distribution of job density (jobs per square mile) within their metro."),
@@ -80,7 +82,7 @@ ui <- fluidPage(
    
    ),
    
-   
+   # explanatory paragraph above the map
    p("Tracts identified as clusters are shown on the map in orange; tracts that meet
      the density threshold (criteria #1) but do not contain the specified minimum
      job percentage (criteria #2) are shown in yellow. All other tracts are colored
@@ -110,13 +112,13 @@ ui <- fluidPage(
 
 )
 
-# Define server logic required to draw map
+# Define server: this part handles all of the data
 server <- function(input, output) {
   
-  # cbsa name
+  # grab the cbsa name from user input
   output$CBSA <- renderText({unlist(str_split(input$cbsa_name, "-"))[[1]]})
   
-  # reactive expression to get filtered shapefile
+  # produce filtered shapefile using user input
   filteredShp <- reactive({
 
     # get a CBSA ID from user input
