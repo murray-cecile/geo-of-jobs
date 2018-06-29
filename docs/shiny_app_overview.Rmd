@@ -1,0 +1,252 @@
+---
+title: "Overview of the map_clusters Shiny app"
+output: html_document
+---
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, libs, cache = TRUE, echo = FALSE, results = FALSE}
+libs <- c("tidyverse", "magrittr", "stringr", "readr", "openxlsx", "janitor", "sp",
+          "tigris", "foreign", "readstata13", "shiny", "rgdal")
+lapply(libs, library, character.only=TRUE)
+
+
+```
+
+This document describes the structure, dependencies, and function of the Shiny app contained in the map_clusters subdirectory. The official RShiny website also has very good documention and resources describing how to build a Shiny app (for example, [this written tutorial](https://shiny.rstudio.com/tutorial/written-tutorial/lesson1/)).
+
+## Data inputs
+
+This section describes the different data tables on which the Shiny app depends, and briefly indicates how they were created. The ```create_data_env.R``` script loads all of these datasets and saves them into the ```data_for_shiny.Rdata``` file that is loaded each time the app is run. Since these input data don't need to change as part of the app, it's much faster to do this pre-processing once, save an R environment containing all of them, and load that environment, rather than running this portion every time. 
+
+### LEHD data
+
+The app uses pre-processed LEHD WAC data for 2010 and 2015 that has been collapsed to the tract level. For each year, there's a dataframe containing job totals, land area, density, a CBSA designation, and a series of density variables indicating how each tract ranks in the density distribution for its CBSA.
+
+These density variables are named according to the number of density quantiles they denote. For example, dense_cat_20 was created by cutting the density distribution for each CBSA into 20 buckets (ventiles), labeled from lowest to highest (1 indicating a value at the 5th percentile or below, 20 indicating a value at the 95th percentile or above). The boolean variable most_dense_20 indicates whether or not a tract falls in the top percentile bucket for that quantile cut. To understand more about how these data files were created from the block-level LEHD data, see the scripts named prepare_LEHD.R and identify_clusters.R in the geo_of_jobs/R subdirectory. 
+
+
+```{r, lehd, collapse = TRUE}
+library(here)
+setwd(here())
+setwd(paste0(here(), "/map_clusters"))
+load("LEHD_WAC_JT00_2010.Rdata")
+load("LEHD_WAC_JT00_2015.Rdata")
+ls()
+
+head(density15)
+
+```
+
+### Geographic data
+
+The CBSA crosswalk is the standard Metro crosswalk linking counties to the 2013 metro delineations. 
+
+The ```top100_coords``` dataframe contains latitude and longitude coordinates for each of the largest 100 metros. The interactive leaflet map uses these coordinates to center the map frame on the selected metro area. These coordinates were obtained using the Google Maps API and reflect the value returned by querying the first city in the metro name. See geo_of_jobs/R/geocode_metros.R for exact script.
+
+The tract shapefile gets read in using ```readOGR```. I had downloaded it previously using the ```tigris``` package, which offers an easy interface for Census TIGER shapefiles at all geographic levels, then saved it using ```writeOGR```.
+
+## Data Preparation
+
+The ```recode_map_vars``` function converts the density variables from the LEHD data into factor (string) variables that correspond to the categories we wish to display on the interactive map. Values named with the letter "p" followed by a number denote that a tract belongs to the density quantile at or above that value. Note that the values here DO NOT yet incorporate any minimum job threshold.
+
+```{r recode, dependson = c, cache = TRUE}
+# function to recode data for the map
+recode_map_vars <- function(df){
+  rv <- mutate(df,
+               mapvar_20 = case_when(
+                 dense_cat_20 < 17 | is.na(dense_cat_20) ~ "low density",
+                 dense_cat_20 == 17 ~ "p80",
+                 dense_cat_20 == 18 ~ "p85",
+                 dense_cat_20 == 19 ~ "p90",
+                 dense_cat_20 == 20 ~ "cluster"
+               ), 
+               mapvar_10 = case_when(
+                 dense_cat_20 < 17 | is.na(dense_cat_20) ~ "low density",
+                 dense_cat_20 == 17 ~ "p80",
+                 dense_cat_20 == 18 ~ "p85",
+                 dense_cat_10 == 10 ~ "cluster"
+               ), 
+               mapvar_5 = ifelse(dense_cat_20 >= 17, "cluster", "low density")
+  )
+  return(rv)
+}
+```
+
+The script calls this function in the next function, ```convert_to_long```. This second function takes a density dataframe structured like ```density15``` or ```density10``` and gathers the density variables into long format. It also creates a year variable to indicate the source year.
+
+```{r convert, dependson = c("libs", "lehd", "recode")}
+# gather data into long, num_quant represents number of quantiles 
+# NB: 20 quantiles means tract in top 5% is a cluster
+convert_to_long <- function(df, yr) {
+  rv <- recode_map_vars(df) %>%
+    mutate(year = yr) %>%
+    gather("num_quant", "mapvar", contains("mapvar")) %>%
+    select(-contains("dense_cat"), -contains("most_dense"))
+  return(rv)
+}
+
+head(convert_to_long(density15, 2015))
+```
+
+Then we bind the two datasets together to create one density dataset in long format. The remaining three sections use this long dataset to calculate job minimums and to compute the descriptive statistics displayed in the table. 
+
+
+## Understanding app.R
+
+The core of the app is contained in the app.R script. All other files support this script with data or functions on which it depends. In addition to some preparatory code, app.R contains two functions: ui(), which controls the layout and user interface, and server(), which runs the data analysis and mapping. 
+
+### Lines 1-28: Setup I
+
+The app loads required packages and sets the working directory. 
+
+Note: if you are running the app locally or on the research servers, and are not planning to push it to the shinyapps.io site, you need to ensure you set the working directory to the map_clusters subdirectory, rather than the main geo_of_jobs project directory. If you are going to publish it on the shinyapps.io site, you should comment out that line before uploading it, as the setwd() command will cause it to fail. 
+
+```{r eval = FALSE}
+library(shiny)
+library(tidyverse)
+library(magrittr)
+library(sp)
+library(sf)
+library(rgdal)
+library(stringr)
+library(janitor)
+library(tigris)
+library(foreign)
+library(leaflet)
+library(ggridges)
+library(viridis)
+
+# # use this ONLY if running locally and with here()
+# # comment out before uploading to Shiny server!
+# library(here)
+# setwd(paste0(here(), "/map_clusters"))
+```
+
+### Line 29: Setup II, prepare_data.R
+
+After loading packages and changing the working directory, app.R calls a script called prepare_data.R. This script performs the following tasks:
+
+1. Loads the .Rdata file containing all the prepared data and shapefiles.
+2. Filters the density data to eliminate data for Massachusetts and Wyoming, for which no LEHD data are available in either/both 2010 and 2015.
+3. Defines two functions that the app will use to create the tract-level shapefile for a metro area. Essentially, these functions filter the density dataset to the tracts within a specified CBSA, then use ```tigris::geo_join``` 
+to perform an inner join with the national tract shapefile to produce a shapefile limited to the tracts in that CBSA. For more on this, see section on the prepared data.
+4. Defines two functions that allow the app to recode the mapped variable (mapvar) based on the user-specified minimum job threshold. See the section on prepared data for more details.
+
+### Lines 32-113: ui
+
+This function defines the user interface - in other words, the ways in which users will input data and how the app will display the results. The elements are listed in order of appearance. 
+
+The following code creates a drop-down menu that allows the user to choose a metro area, using the selectInput widget. The name of the widget is cbsa_name, which we'll later use to access user input in the server function. The choices are an alphabetically sorted list of the names of the top 100 metros (taken from a data frame called top100_coords.) We defined the Baltimore MSA as the default selection using the "selected" argument.
+
+```{r eval=FALSE}
+   # select box for metro names
+   selectInput("cbsa_name",
+               label = "Choose a metro area",
+               choices = sort(unique(top100_coords$cbsa_name)),
+               selected = "Baltimore-Columbia-Towson, MD"),
+```
+
+This is the code used to create the year slider. It is named year_slider; again, we'll use that name later to access user input. The min, max, and step parameters are set so that the slider can only stop on 2010 or 2015. The value parameter sets a default starting value of 2015. The sep parameter formats the numbers to remove a thousands separator, which we don't want because these are years. 
+
+```{r eval=FALSE}
+# slider for years (currently set up for only 2010 and 2015)
+   sliderInput("year_slider", label = "Year",
+               min = 2010, max = 2015, value = 2015, step = 5, sep = ""),
+```
+
+These next two widgets define the radio buttons and the job minimum slider. Note again the name of each widget. The slider for the job minimum threshold works essentially the same way as the year slider. In the radio button widget, we assign numeric values to each of the choises; we'll use these to perform calculations in the server function. 
+
+The splitLayout function surrounding these two widgets causes them to appear side by side.
+
+```{r eval=FALSE}
+  # split layout for radio buttons and sliders
+   splitLayout(
+   
+   # radio buttons for density
+   radioButtons("radio", label = "Density threshold",
+                choices = list("Top 5 percent" = 1, 
+                               "Top 10 percent" = 2,
+                               "Top 20 percent" = 3),
+                selected = 2),
+   
+   # slider for minimum job threshold
+   sliderInput("job_min", label = "Minimum job threshold (% of metro jobs)", 
+               min = 0, max = 1, step = 0.25, value = 0),
+   
+   br()
+   
+   ),
+```
+
+After that, each of the functions ending in the word "Output" control the display of the corresponding object from the server function.
+
+```{r eval = FALSE}
+   # leaflet map of the job clusters
+   leafletOutput("cbsa"),
+   
+   # Source line for the map
+   textOutput("source"),
+   br(),
+   
+   # Descriptive stats
+   h4("Descriptive stats for this metro area:"),
+   textOutput("descriptive_text"),
+   br(),
+   
+   # overview stats that are the same from year to year
+   tableOutput("overview"),
+   
+   # histogram
+   plotOutput("distribution")
+```
+
+### Lines 113-299: server
+
+The server function creates and controls all of the calculations and charts in the interactive, based on the inputs provided by the user through the ui function. It is lengthy and complex, but essentially, there are two kinds of objects created in this function: those used internally, and those that correspond to something displayed in the ui. 
+
+#### Calculations under the hood
+
+Taking the former category first, we'll look at filteredShp, colorPal, and Coords. Each of these objects contains data or functions needed in the map, tables, and chart.
+
+First, filteredShp() produces a shapefile with the necessary data that has been trimmed to include only tracts in the user-specified CBSA. It takes the user inputs and converts them into a CBSA ID and a density threshold label that can be matched with the num_quant variable in the density dataset. It also filters the full density dataset so that it contains only data for that year and density threshold and applies the ```recode_job_min``` and the ```create_cbsa_shp``` functions from ```prepare_data.R``` to create the necessary shapefile for the map. Note that the return value of ```create_cbsa_shp``` is not assigned to anything; that's why it's the object returned by filteredShp(). This structure allows it to be accessed by other parts of the server function.
+
+```{r eval = FALSE}
+  # produce filtered shapefile using user input
+  filteredShp <- reactive({
+
+    # get a CBSA ID from user input
+    cbsa_id <- unique(top100_xwalk$cbsa[top100_xwalk$cbsa_name==input$cbsa_name])
+    
+    # get threshold from user input and recode
+    thresh <- "default"
+    thresh <- case_when(
+      input$radio == 1 ~ "mapvar_20",
+      input$radio == 2 ~ "mapvar_10",
+      input$radio == 3 ~ "mapvar_5"
+    )
+    
+    # filter by year and density threshold
+    filteredData <- filter(density,
+                           year==input$year_slider,
+                           num_quant==thresh)
+    
+    # recode according to job threshold
+    filteredData %<>% recode_job_min(cbsa_id = cbsa_id,
+                                     yr = input$year_slider,
+                                     thresh = thresh,
+                                     min_pp = input$job_min,
+                                     met_jobs = met_jobs)
+    
+    # select tracts in that CBSA and create cbsa-specific tract shapefile with data
+    create_cbsa_shp(select_cbsa_tracts(filteredData,
+                                                  cbsa_id,
+                                                  xwalk = top100_xwalk))
+
+  })
+```
+
+
+

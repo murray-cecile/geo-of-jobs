@@ -32,7 +32,7 @@ top100_xwalk <- cbsa_xwalk %>% filter(top100==1) %>%
 # CONSTRUCT DENSITY DATASET
 #============================================================#
 
-# function to add year indicator and to recode data for the map
+# function to recode data for the map
 recode_map_vars <- function(df){
   rv <- mutate(df,
                mapvar_20 = case_when(
@@ -54,12 +54,11 @@ recode_map_vars <- function(df){
 }
 
 # gather data into long, num_quant represents number of quantiles 
-# NB: 20 quantiles means tract in top 5% is a cluster
+# NB: 20 quantiles implies tract in top 5% is a cluster
 convert_to_long <- function(df, yr) {
   rv <- recode_map_vars(df) %>%
     mutate(year = yr) %>%
     gather("num_quant", "mapvar", contains("mapvar")) %>%
-    # mutate(num_quant = gsub("most_dense", "quant", num_quant1)) %>%
     select(-contains("dense_cat"), -contains("most_dense"))
   return(rv)
 }
