@@ -7,11 +7,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r, libs, cache = TRUE, echo = FALSE, results = FALSE}
+```{r libs, echo = FALSE, results = FALSE, cache = TRUE}
 libs <- c("tidyverse", "magrittr", "stringr", "readr", "openxlsx", "janitor", "sp",
           "tigris", "foreign", "readstata13", "shiny", "rgdal")
 lapply(libs, library, character.only=TRUE)
-
 
 ```
 
@@ -28,12 +27,13 @@ The app uses pre-processed LEHD WAC data for 2010 and 2015 that has been collaps
 These density variables are named according to the number of density quantiles they denote. For example, dense_cat_20 was created by cutting the density distribution for each CBSA into 20 buckets (ventiles), labeled from lowest to highest (1 indicating a value at the 5th percentile or below, 20 indicating a value at the 95th percentile or above). The boolean variable most_dense_20 indicates whether or not a tract falls in the top percentile bucket for that quantile cut. To understand more about how these data files were created from the block-level LEHD data, see the scripts named prepare_LEHD.R and identify_clusters.R in the geo_of_jobs/R subdirectory. 
 
 
-```{r, lehd, collapse = TRUE}
+```{r, lehd, collapse = TRUE, cache = TRUE}
 library(here)
 setwd(here())
 setwd(paste0(here(), "/map_clusters"))
 load("LEHD_WAC_JT00_2010.Rdata")
 load("LEHD_WAC_JT00_2015.Rdata")
+load("top100_coords.Rdata")
 ls()
 
 head(density15)
@@ -50,9 +50,11 @@ The tract shapefile gets read in using ```readOGR```. I had downloaded it previo
 
 ## Data Preparation
 
+### Preparing LEHD data
+
 The ```recode_map_vars``` function converts the density variables from the LEHD data into factor (string) variables that correspond to the categories we wish to display on the interactive map. Values named with the letter "p" followed by a number denote that a tract belongs to the density quantile at or above that value. Note that the values here DO NOT yet incorporate any minimum job threshold.
 
-```{r recode, dependson = c, cache = TRUE}
+```{r recode, dependson = c("libs", "lehd"), cache = TRUE}
 # function to recode data for the map
 recode_map_vars <- function(df){
   rv <- mutate(df,
@@ -77,7 +79,7 @@ recode_map_vars <- function(df){
 
 The script calls this function in the next function, ```convert_to_long```. This second function takes a density dataframe structured like ```density15``` or ```density10``` and gathers the density variables into long format. It also creates a year variable to indicate the source year.
 
-```{r convert, dependson = c("libs", "lehd", "recode")}
+```{r convert, dependson = c("libs", "lehd", "recode"), cache = TRUE}
 # gather data into long, num_quant represents number of quantiles 
 # NB: 20 quantiles means tract in top 5% is a cluster
 convert_to_long <- function(df, yr) {
@@ -89,10 +91,139 @@ convert_to_long <- function(df, yr) {
 }
 
 head(convert_to_long(density15, 2015))
+
+# recode variables and drop extraneous vars
+density <- bind_rows(convert_to_long(density15, 2015),
+                     convert_to_long(density10, 2010)) %>%
+  arrange(tract)
 ```
 
-Then we bind the two datasets together to create one density dataset in long format. The remaining three sections use this long dataset to calculate job minimums and to compute the descriptive statistics displayed in the table. 
+Then we bind the two datasets together to create one density dataset in long format. We need it in long format so that we can easily filter the data for the interactive map.
 
+The remaining three sections use this long dataset to calculate job minimums and to compute the descriptive statistics displayed in the table. 
+
+### Calculate minimum jobs thresholds
+
+First, we collapse the density dataset by metro area to get the total number of jobs in each metro area in each year (choosing one of the density thresholds arbitrarily as all we're after here is the job total). Then we multiply by each of the possible minimum thresholds, and convert to long.
+
+```{r min_jobs, dependson=c("libs", "lehd", "convert"), cache = TRUE}
+met_jobs <- density %>% filter(num_quant == "mapvar_20") %>%
+  select(cbsa, cbsa_name, year, job_tot) %>%
+  group_by(cbsa, cbsa_name, year) %>% summarize(job_tot = sum(job_tot, na.rm=TRUE)) %>% 
+  mutate(zero_pp = job_tot * 0,
+         oquart_pp = job_tot * 0.0025,
+         half_pp = job_tot * 0.005,
+         tquart_pp = job_tot * 0.0075,
+         one_pp = job_tot * 0.01) %>%
+  gather("pp_min", "job_min", contains("pp"), -cbsa, -cbsa_name, -year)
+
+head(met_jobs)
+```
+
+### Compute descriptive stats
+
+The function ```compute_density_thresholds``` and the ```calc_descriptive_stats.R``` script both calcuate some descriptive statistics that are useful either in understanding the analysis or in creating the table shown below the map. Specifically, ```compute_density_thresholds``` calculates 80th, 85th, 90th, and 95th percentile of job density in each metro. Currently, this is not used in the app, but it may be useful context. For its part, ```calc_descriptive_stats.R``` computes the statistics displayed in the table below the map, as well as additional statistics saved in the .csv file named ```met_summary.csv```.
+
+Specifically, ```create_descriptive_stats.R``` is mostly aimed at calculating the number and share of jobs in clusters under each possible definition. 
+
+First, the ```flag_clusters``` function takes the main density dataframe and one set of job minimums and flags which tracts qualify under each density threshold and the singular minimum job threshold. Essentially, that means that it can be used to identify which tracts are clusters (i.e. meet both the density and the job minimum criteria) and which are high-density (i.e. meet the density criteria but don't contain enough jobs). It will do this for all three possible density thresholds and one of the job minimums at any given time. 
+
+```{r flag_clusters, dependson=c("libs", "lehd", "recode"), cache=TRUE}
+  # Flag thresholds for all density thresholds at a given job minimum
+flag_clusters <- function(df, job_min_df){
+  # NB: job_min_df contains all cbsa ID-year combos but only one job min
+  
+  rv <- df %>% left_join(job_min_df, by = c("cbsa", "year")) %>% 
+    mutate(
+    mapvar = case_when(
+      (mapvar == "cluster") & (job_tot > job_min) ~ "cluster",
+      (mapvar == "cluster") & (job_tot <= job_min) ~ "high density",
+      mapvar != "cluster" ~ mapvar
+    ),
+    tr_ct = 1,
+    high_ct = ifelse(mapvar == "high density", 1, 0),
+    cluster_ct = ifelse(mapvar == "cluster", 1, 0))
+  
+  return(rv)
+}
+```
+
+The ```trim_job_min_df``` function works in tandem with ```flag_clusters``` by creating the filtered job minimum data frame.
+
+```{r trim_job_min, dependson=c("libs", "lehd", "min_jobs"), cache=TRUE}
+# create job min data frame for top 100 metros at given job min
+trim_job_min_df <- function(met_jobs, min_pp){
+  # weird fix because I can't pass a string directly somehow
+  min <- case_when(
+    min_pp == 0 ~ "zero_pp",
+    min_pp == 0.25 ~ "oquart_pp",
+    min_pp == 0.5 ~ "half_pp",
+    min_pp == 0.75 ~ "tquart_pp",
+    min_pp == 1 ~ "one_pp",
+    TRUE ~ "zero_pp"
+  )
+  job_min_df <- filter(ungroup(met_jobs), pp_min == min) %>%
+    select(cbsa, year, job_min)
+  return(job_min_df)
+}
+
+head(trim_job_min_df(met_jobs, "zero_pp"))
+```
+
+Next, we combine these two functions in ```summarize_by_metro```, which calls the above two functions and performs the collapse by metro, year, and density thresholds.
+
+```{r summarize, dependson=c("flag_clusters", "trim_job_min"), cache = TRUE}
+# Summarize cbsa clusters and jobs for a given density threshold and job min combo
+summarize_by_metro <- function(df, min_pp, met_jobs = met_jobs, cbsa = cbsa_xwalk) {
+  
+  # prepare cbsa list and create job minimum df
+  cbsa <- top100_coords %>% select(cbsa, cbsa_name)
+  job_min_df <- met_jobs %>% trim_job_min_df(min_pp)
+  
+  # flag clusters
+  rv <- df %>% filter(!is.na(cbsa)) %>% flag_clusters(job_min_df) 
+  
+  # group by cbsa and summarize, only include top 100 metros
+  rv %<>% select(-tract, -ALAND_SQMI, -density, -cbsa_name) %>%
+    group_by(cbsa, year, num_quant) %>%
+    summarize(jobs = sum(job_tot, na.rm=TRUE),
+              cluster_jobs = sum(job_tot * cluster_ct, na.rm=TRUE),
+              tr_ct = sum(tr_ct),
+              high_ct = sum(high_ct, na.rm=TRUE),
+              cluster_ct = sum(cluster_ct, na.rm=TRUE)) %>%
+    left_join(select(cbsa, cbsa, cbsa_name), by="cbsa") %>% 
+    filter(!is.na(cbsa_name)) %>%
+    mutate(min = min_pp) %>% 
+    select(cbsa, cbsa_name, year, num_quant, min, everything())
+  
+  return(rv)
+}
+```
+
+Lastly, we use the ```lapply()``` function to repeatedly call the ```summarize_by_metro``` function that we just wrote. Essentially, the code runs through the following steps:
+
+1. Creates a list of the numbers from 0 to 1, incrementing by 0.25 using ```seq()```
+2. Iteratively calls ```summarize_by_metro()``` with each of those numbers in turn
+3. Appends all of the resulting data frames together
+4. Computes the share of tracts flagged as clusters and the share of jobs contained in those clusters under each definition in each year
+5. Renames the density threshold to something ready to display 
+
+```{r met_summary, dependson=c("summarize"), cache=TRUE}
+met_summary <- lapply(seq(0, 1, 0.25), function(x){
+  summarize_by_metro(density, min_pp = x, met_jobs = met_jobs, cbsa = cbsa_xwalk)}) %>%
+  bind_rows() %>% 
+  mutate(cluster_share = cluster_ct / tr_ct,
+         job_share = (cluster_jobs / jobs) * 100) %>% 
+  mutate(num_quant = case_when(
+    num_quant == "mapvar_20" ~ "95th percentile",
+    num_quant == "mapvar_10" ~ "90th percentile",
+    num_quant == "mapvar_5" ~ "80th percentile"
+  ))
+
+head(met_summary)
+```
+
+Lastly, we perform a couple of cosmetic tweaks so the numbers in the final table displayed in the app are formatted with thousands separators and without any decimals.
 
 ## Understanding app.R
 
@@ -209,7 +340,7 @@ The server function creates and controls all of the calculations and charts in t
 
 #### Calculations under the hood
 
-Taking the former category first, we'll look at filteredShp, colorPal, and Coords. Each of these objects contains data or functions needed in the map, tables, and chart.
+Taking the former category first, we'll look at two of the reactive objects, ```filteredShp()``` and ```colorPal()```. Each object contains data or functions needed in the map, tables, and chart.
 
 First, filteredShp() produces a shapefile with the necessary data that has been trimmed to include only tracts in the user-specified CBSA. It takes the user inputs and converts them into a CBSA ID and a density threshold label that can be matched with the num_quant variable in the density dataset. It also filters the full density dataset so that it contains only data for that year and density threshold and applies the ```recode_job_min``` and the ```create_cbsa_shp``` functions from ```prepare_data.R``` to create the necessary shapefile for the map. Note that the return value of ```create_cbsa_shp``` is not assigned to anything; that's why it's the object returned by filteredShp(). This structure allows it to be accessed by other parts of the server function.
 
@@ -248,5 +379,88 @@ First, filteredShp() produces a shapefile with the necessary data that has been 
   })
 ```
 
+Meanwhile, the ```colorPal()``` object holds the function we use to assign colors to variable values in the interactive map. We give the colorFactor function a list of colors (listed by HEX code) and a list of possible values (levels), so that when evaluated, it will map a value to a color. There are two cases here: if the job threshold is set greater than zero, then some tracts will be labeled "high density" and will therefore require the additional yellow color. Otherwise, the assignment should be the same. 
 
+```{r colorpal, eval = FALSE}
+ # define function to assign colors to polygons
+  colorPal <- reactive({
 
+    if(input$job_min > 0){
+      colorFactor(c("#FF5E1A", "#FFCF1A","#E0ECFB", "#00649F", "#3E83C1", "#A4C7F2"),
+                  levels = c("cluster", "high density", "low density", "p90",
+                             "p85", "p80"))
+    } else {
+      colorFactor(c("#FF5E1A", "#E0ECFB", "#A4C7F2", "#3E83C1", "#00649F"),
+                  levels = c("cluster", "low density", "p90",
+                             "p85", "p80"))
+    }
+  })
+```  
+
+#### Creating the map
+
+Two parts of the server function create the interactive map, which is drawn using a package called leaflet. 
+
+First, we create a basemap with no data on it. Essentially, we just set the default leaflet base map (dervied from Open Street Map, though other base maps are available) to a generic zoom at a specified set of coordinates. These coordinates are the ones saved in the ```top100_coords``` dataframe; that dataframe is filtered down to the user-specified metro area in the ```Coords()``` object (also part of the server function).
+
+``` {r basemap, eval = FALSE}
+  # draw the map (this part remains static unless the CBSA changes)
+  output$cbsa <- renderLeaflet({
+
+    coords <- Coords()
+    
+    # make the leaflet map
+    leaflet() %>%
+      setView(lng = coords$lon, lat = coords$lat, zoom = 9) %>%
+      addTiles() 
+  })
+```
+
+The next piece of code adds the tract shapefile to the map, with each tract colored according to its classification. It draws from the objects created earlier (```filteredShp()``` and ```colorPal()```). The data labels are pulled out of the dataframe associated with the filtered spacefile, and then filled into the label template. 
+
+Finally, the tract tiles are added using ```leafletProxy()```. Essentially, this just indicates that the data are to come from ```filteredShp()``` and that the fill color of the tract polygons should be assigned using the function we created in ```colorPal()```. Notably, ```clearShapes()``` clears off any existing polygon layers so that multiple layers don't build up over time. 
+
+```{r mapdata, eval = FALSE}
+  # Observer that updates map with new selected data
+  observe({
+    
+    pal0 <- colorPal()
+    
+    # set labels
+    labeldata <- filteredShp()@data
+    labels <- sprintf("<strong>Tract %s</strong><br/>%g jobs in %g mi<sup>2</sup> = density of %g",
+                      labeldata$tract, labeldata$job_tot, labeldata$ALAND_SQMI,
+                      labeldata$density) %>%
+      lapply(htmltools::HTML)
+    
+    leafletProxy("cbsa", data = filteredShp()) %>%
+      clearShapes() %>%
+      addPolygons(color = "#FFFFFF", weight = 1, smoothFactor = 0.5,
+                  opacity = 1, fillOpacity = 0.75,
+                  fillColor = ~pal0(mapvar),
+                  highlight = highlightOptions(
+                    weight = 3,
+                    color = "#666",
+                    fillOpacity = 0.7,
+                    bringToFront = TRUE),
+                  label = labels,
+                  labelOptions = labelOptions(list("font-weight" = "normal",
+                                                   padding = "3px 8px"),
+                                              textsize = "15px", direction = "auto"))
+  })
+```
+
+The last observer updates the legend based on the filtered data. It works very similarly to the observer above, including a clearControls() command to clear any old legends before adding a new one to reflect new user input.
+
+```{r legend, eval=FALSE}
+  # observer to update legend with new data selection
+  observe({
+    proxy <- leafletProxy("cbsa", data = filteredShp())
+    
+    proxy %>% clearControls() %>%
+      addLegend(pal = colorPal(), values = ~mapvar, opacity = 0.75,
+                title = NULL, position = "bottomright")
+  })
+```
+
+The last three parts of the server function are ```descriptive_text```, ```overview```, and ```distribution```, which respectively control the text above the table, the contents of the table, and the distribution plot. None involve any code that wouldn't run in normal R, outside of the Shiny environment (as long as any user input$ values were replaced with other valid values).
